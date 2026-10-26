@@ -42,7 +42,7 @@ python tools/draw_sushi.py
 
 ## 发布新版本时
 
-`index.html` 里引用 `style.css` 和 `app.js` 时带着版本号（`?v=0.3.1`）。改了这两个文件后记得改版本号，
+`index.html` 里引用 `style.css` 和 `app.js` 时带着版本号（如 `?v=0.4`），插图地址的版本号在 `app.js` 的 `ASSET_VERSION`。改了这些文件后记得改版本号，
 否则手机浏览器可能还在用缓存里的旧文件。
 
 ## 题库格式

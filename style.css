@@ -317,20 +317,21 @@ body:not(.show-romaji) .plate .romaji { display: none; }
   .tag[aria-pressed="true"] { border-color: var(--ink); box-shadow: 0 0 0 2px var(--ink); }
 }
 
-/* 图片模式：小票换成插图，每一行高一点，左右两列要一样高才对得齐 */
-.board.pic .plate, .board.pic .tag { min-height: 74px; }
+/* 图片模式：小票换成插图，左右两列要一样高才对得齐 */
+.board.pic .plate, .board.pic .tag { min-height: 66px; }
 
+/* 图完整显示、透明底，不加框；选中和连对时才出现边框 */
 .tag.pic {
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 0;
-  overflow: hidden;
-  background: var(--porcelain);
+  background: transparent;
+  border-color: transparent;
 }
 
-/* 铺满小票，只裁掉盘子上下的空白，寿司就显得大 */
-.tag.pic img { width: 100%; height: 74px; object-fit: cover; object-position: 50% 58%; display: block; }
+.tag.pic img { width: 100%; height: 62px; object-fit: contain; display: block; }
+.tag.pic[aria-pressed="true"] { border-color: var(--noren); }
 
 .plate.done, .tag.done { cursor: default; }
 .plate.done { box-shadow: inset 0 0 0 3px var(--porcelain), inset 0 0 0 4.5px var(--rim); }
@@ -399,7 +400,7 @@ body:not(.show-romaji) .plate .romaji { display: none; }
 }
 
 .summary .mark { font-weight: 700; }
-.summary .thumb { width: 64px; height: 51px; object-fit: contain; border-radius: 4px; background: var(--porcelain); }
+.summary .thumb { width: 64px; height: 46px; object-fit: contain; }
 .summary .mark.miss { color: var(--tier-2); }
 .summary .mark.ok { color: var(--ok); }
 .summary .word { font-family: var(--kana-font); font-weight: 700; }
@@ -574,6 +575,43 @@ body:not(.show-romaji) .plate .romaji { display: none; }
   padding: 10px;
   color: #5c6b75;
   font-size: 0.9375rem;
+}
+
+/* ---------- 电脑宽屏 ---------- */
+
+/* 有鼠标的设备：悬停时给一点反馈 */
+@media (hover: hover) {
+  .plate:not(.done):not([aria-pressed="true"]):hover { transform: translateY(-2px); }
+  .tag:not(.done):not([aria-pressed="true"]):hover { border-color: var(--muted); }
+  .chips button:not([aria-pressed="true"]):hover { border-color: var(--muted); }
+}
+
+/* 内容区放宽、字和盘子放大；顶栏和底部托盘的内容跟内容区对齐，不再贴着屏幕两边 */
+@media (min-width: 720px) {
+  main { max-width: 680px; padding-top: 28px; }
+
+  .noren, .tray {
+    padding-left: max(16px, calc((100vw - 680px) / 2 + 16px));
+    padding-right: max(16px, calc((100vw - 680px) / 2 + 16px));
+  }
+
+  .noren h1 { font-size: 1.5rem; }
+
+  /* 分类不用横向滚动，全部排开 */
+  .chips { flex-wrap: wrap; margin: 14px 0 0; padding: 0; }
+
+  .board { column-gap: 56px; }
+  .col { gap: 14px; }
+  .plate, .tag { min-height: 68px; }
+  .plate { max-width: 260px; }  /* 太宽的话椭圆会被拉扁 */
+  .plate .kana { font-size: 1.5rem; }
+  .plate .kana.long { font-size: 1.25rem; }
+  .tag { font-size: 1.0625rem; padding: 8px 14px; }
+
+  .board.pic .plate, .board.pic .tag { min-height: 84px; }
+  .tag.pic img { height: 80px; }
+
+  .fact { font-size: 1rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {

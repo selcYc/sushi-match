@@ -82,7 +82,8 @@ def glints(points):
 
 def svg(defs, body):
     return (
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 96">\n'
+        # 上面 10 个单位是空白（最高的虾尾也在 y=15 以下），裁掉，同样高度下寿司显得更大
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 10 120 86">\n'
         f"  <defs>\n{COMMON_DEFS}{defs}  </defs>\n{body}</svg>\n"
     )
 

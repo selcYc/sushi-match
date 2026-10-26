@@ -71,7 +71,7 @@ const $ = (sel) => document.querySelector(sel);
 const state = {
   categories: [],
   words: [],
-  settings: load("sushi-match", { ui: "zh", answer: "zh", romaji: false, cats: [] }),
+  settings: load("sushi-match", { ui: "zh", answer: "pic", romaji: false, cats: [] }),
   // plates：这一餐吃到的盘子；review：答错过、还在传送带上转的词
   progress: load("sushi-match-progress", { plates: [], review: [] }),
   bag: [],
@@ -104,7 +104,9 @@ function t(key, vars = {}) {
 }
 
 const word = (id) => state.words.find((w) => w.id === id);
-const picture = (id) => `img/sushi/${id}.svg`;
+// 插图更新时改这个版本号，让手机重新下载，不用缓存里的旧图（和 index.html 里 css/js 的版本号一起改）
+const ASSET_VERSION = "0.4";
+const picture = (id) => `img/sushi/${id}.svg?v=${ASSET_VERSION}`;
 
 // 右边小票的内容：图片模式放插图（alt 用当前界面语言的意思），否则放文字
 function fillTag(tag, w) {
