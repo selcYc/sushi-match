@@ -2,6 +2,8 @@
 
 把回转寿司店里写成平假名的菜名，连到对应的意思上。手机网页，中英双语。
 
+**在线玩：https://selcyc.github.io/sushi-match/**（GitHub Pages，推送到 `main` 后一两分钟自动更新）
+
 想法和后续计划见 [IDEA.md](IDEA.md)。
 
 ## 本地运行
