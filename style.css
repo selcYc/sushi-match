@@ -17,9 +17,16 @@
   --tier-4: #d9a21b;  /* 金 ¥360 */
   --ok: #3b8657;
 
+  /* 按语言分开用字体：Zen Maru Gothic 是日文字体，没有很多简体字，
+     共用的汉字也会画成日文字形，所以中文一律用系统的简体中文字体 */
   --kana-font: "Zen Maru Gothic", "Hiragino Maru Gothic ProN", "Yu Gothic", sans-serif;
-  --body-font: "Zen Maru Gothic", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --zh-font: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", "Noto Sans CJK SC", "Source Han Sans SC", sans-serif;
+  --en-font: "Zen Maru Gothic", var(--zh-font);
 }
+
+:lang(zh) { font-family: var(--zh-font); }
+:lang(en) { font-family: var(--en-font); }
+:lang(ja) { font-family: var(--kana-font); }
 
 @media (prefers-color-scheme: dark) {
   :root {
@@ -41,7 +48,6 @@ body {
   margin: 0;
   background: var(--steel);
   color: var(--ink);
-  font-family: var(--body-font);
   font-size: 16px;
   line-height: 1.5;
   -webkit-tap-highlight-color: transparent;
@@ -65,7 +71,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 .noren h1 {
   margin: 0;
-  font-family: var(--kana-font);
   font-weight: 700;
   font-size: 1.25rem;
   letter-spacing: 0.04em;

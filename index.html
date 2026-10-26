@@ -10,14 +10,14 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=0.4.1">
+  <link rel="stylesheet" href="style.css?v=0.4.2">
 </head>
 <body>
   <header class="noren">
     <h1 data-i18n="title">回转寿司连线</h1>
     <div class="seg" role="group" aria-label="Language">
-      <button type="button" data-ui="zh">中</button>
-      <button type="button" data-ui="en">EN</button>
+      <button type="button" data-ui="zh" lang="zh-CN">中</button>
+      <button type="button" data-ui="en" lang="en">EN</button>
     </div>
   </header>
   <div class="belt" aria-hidden="true"></div>
@@ -28,8 +28,8 @@
         <span data-i18n="answer">右边显示</span>
         <div class="seg" role="group">
           <button type="button" data-answer="pic" data-i18n="pic">图</button>
-          <button type="button" data-answer="zh">中文</button>
-          <button type="button" data-answer="en">English</button>
+          <button type="button" data-answer="zh" lang="zh-CN">中文</button>
+          <button type="button" data-answer="en" lang="en">English</button>
         </div>
         <label class="check">
           <input type="checkbox" id="romaji">
@@ -69,6 +69,6 @@
 
   <dialog class="bill" id="bill"></dialog>
 
-  <script src="app.js?v=0.4"></script>
+  <script src="app.js?v=0.4.2"></script>
 </body>
 </html>

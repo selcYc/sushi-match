@@ -121,6 +121,9 @@ function fillTag(tag, w) {
   } else {
     tag.textContent = w[state.settings.answer];
   }
+  // 标上语言，浏览器才会用对字体（中文不用日文字形）
+  if (pic) tag.removeAttribute("lang");
+  else tag.lang = state.settings.answer === "zh" ? "zh-CN" : "en";
 }
 const rim = (id) => `var(--tier-${word(id).tier})`;
 const rimColor = (id) =>
@@ -415,8 +418,23 @@ function showSummary() {
     li.querySelector(".mark").textContent = missed ? "✗" : "✓";
     li.querySelector(".mark").classList.add(missed ? "miss" : "ok");
     li.querySelector(".word").textContent = w.kana;
-    li.querySelector(".meta").textContent = [w.kanji, w.romaji, price(w.tier)].filter(Boolean).join("，");
-    li.querySelector("div > div").textContent = `${w.zh} / ${w.en}`;
+    // 汉字是日文写法，单独标成日文；中英意思也各自标上语言，字体才不会混
+    const meta = li.querySelector(".meta");
+    const sep = state.settings.ui === "zh" ? "，" : ", ";
+    if (w.kanji) {
+      const kanji = document.createElement("span");
+      kanji.lang = "ja";
+      kanji.textContent = w.kanji;
+      meta.append(kanji, sep);
+    }
+    meta.append([w.romaji, price(w.tier)].join(sep));
+    const zh = document.createElement("span");
+    zh.lang = "zh-CN";
+    zh.textContent = w.zh;
+    const en = document.createElement("span");
+    en.lang = "en";
+    en.textContent = w.en;
+    li.querySelector("div > div").append(zh, " / ", en);
     ul.append(li);
   }
   box.querySelector(".primary").addEventListener("click", () => {
