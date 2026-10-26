@@ -1,0 +1,581 @@
+:root {
+  --steel: #e7ebed;      /* 店里的不锈钢台面 */
+  --steel-dark: #9aa5ad;  /* 传送带链节 */
+  --surface: #ffffff;
+  --ink: #1c2b36;
+  --muted: #5c6b75;
+  --noren: #23395b;       /* 藍色暖帘 */
+  --noren-ink: #f2f5f7;
+  --porcelain: #fbfaf7;   /* 盘子的白瓷 */
+  --wrong: #8a96a0;
+
+  /* 盘子颜色 = 价格档位，和店里一样 */
+  --tier-0: #aab3b9;  /* 白盘，免费 */
+  --tier-1: #2b67a8;  /* 蓝 ¥120 */
+  --tier-2: #c23b2e;  /* 红 ¥180 */
+  --tier-3: #6e4c94;  /* 紫 ¥260 */
+  --tier-4: #d9a21b;  /* 金 ¥360 */
+  --ok: #3b8657;
+
+  --kana-font: "Zen Maru Gothic", "Hiragino Maru Gothic ProN", "Yu Gothic", sans-serif;
+  --body-font: "Zen Maru Gothic", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --steel: #172028;
+    --steel-dark: #3a4853;
+    --surface: #22303b;
+    --ink: #e6ecef;
+    --muted: #9fadb6;
+    --noren: #1a2c47;
+    --wrong: #6b7882;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--steel);
+  color: var(--ink);
+  font-family: var(--body-font);
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button { font: inherit; color: inherit; cursor: pointer; }
+
+:focus-visible { outline: 3px solid var(--tier-1); outline-offset: 2px; }
+
+/* ---------- 顶部：暖帘 + 传送带 ---------- */
+
+.noren {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: calc(14px + env(safe-area-inset-top)) 16px 14px;
+  background: var(--noren);
+  color: var(--noren-ink);
+}
+
+.noren h1 {
+  margin: 0;
+  font-family: var(--kana-font);
+  font-weight: 700;
+  font-size: 1.25rem;
+  letter-spacing: 0.04em;
+}
+
+.belt {
+  height: 14px;
+  background:
+    repeating-linear-gradient(90deg, var(--steel-dark) 0 22px, transparent 22px 24px),
+    var(--steel-dark);
+  background-color: #7d8991;
+  box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.15);
+}
+
+main {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 16px 16px calc(112px + env(safe-area-inset-bottom));
+}
+
+/* ---------- 切换按钮 ---------- */
+
+.seg {
+  display: inline-flex;
+  border-radius: 999px;
+  padding: 3px;
+  background: rgba(127, 140, 150, 0.22);
+}
+
+.seg button {
+  border: 0;
+  background: transparent;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 0.875rem;
+}
+
+.seg button[aria-pressed="true"] {
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.noren .seg { background: rgba(255, 255, 255, 0.14); }
+.noren .seg button { color: var(--noren-ink); }
+.noren .seg button[aria-pressed="true"] { background: var(--noren-ink); color: var(--noren); }
+
+.controls .row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.check input { width: 18px; height: 18px; accent-color: var(--noren); }
+
+.chips {
+  display: flex;
+  gap: 8px;
+  margin: 12px -16px 0;
+  padding: 0 16px 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.chips::-webkit-scrollbar { display: none; }
+
+.chips button {
+  flex: none;
+  border: 1.5px solid var(--steel-dark);
+  background: transparent;
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 0.875rem;
+  white-space: nowrap;
+}
+
+.chips button[aria-pressed="true"] {
+  border-color: var(--noren);
+  background: var(--noren);
+  color: var(--noren-ink);
+}
+
+/* ---------- 一轮 ---------- */
+
+.round { margin-top: 20px; }
+
+.round-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.round-head h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.dots {
+  display: flex;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dots li {
+  width: 18px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--steel-dark);
+}
+
+.dots li.on {
+  border-color: var(--rim);
+  background: var(--porcelain);
+  box-shadow: inset 0 0 0 1px var(--rim);
+}
+
+.hint {
+  margin: 4px 0 12px;
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+.board {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  column-gap: 32px;
+}
+
+.lines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.lines line {
+  stroke-width: 4;
+  stroke-linecap: round;
+  animation: draw 0.35s ease-out both;
+}
+
+.lines circle { animation: pop 0.2s ease-out both; }
+
+@keyframes draw {
+  from { stroke-dashoffset: var(--len); }
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes pop {
+  from { r: 0; }
+}
+
+.col {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.col li { display: flex; }
+
+/* 盘子：从侧面看过去的椭圆盘 */
+.plate {
+  position: relative;
+  width: 100%;
+  min-height: 60px;
+  border: 5px solid var(--rim);
+  border-radius: 50%;
+  background: var(--porcelain);
+  box-shadow:
+    inset 0 0 0 3px var(--porcelain),
+    inset 0 0 0 4.5px var(--rim),
+    0 3px 0 rgba(0, 0, 0, 0.12);
+  color: #1c2b36;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 6px;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.plate .kana {
+  font-family: var(--kana-font);
+  font-weight: 700;
+  font-size: 1.25rem;
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+}
+
+.plate .kana.long { font-size: 1.05rem; letter-spacing: 0; }
+
+.plate .romaji {
+  font-size: 0.75rem;
+  color: #5c6b75;
+  line-height: 1.2;
+}
+
+body:not(.show-romaji) .plate .romaji { display: none; }
+
+.plate[aria-pressed="true"] {
+  transform: translateY(-4px) scale(1.04);
+  box-shadow:
+    inset 0 0 0 3px var(--porcelain),
+    inset 0 0 0 4.5px var(--rim),
+    0 0 0 3px var(--steel),
+    0 0 0 6px var(--rim),
+    0 10px 16px rgba(0, 0, 0, 0.25);
+}
+
+/* 意思：点餐平板上的小票 */
+.tag {
+  width: 100%;
+  min-height: 60px;
+  border: 1.5px solid var(--steel-dark);
+  border-radius: 6px;
+  background: var(--surface);
+  padding: 6px 10px;
+  text-align: left;
+  font-size: 0.9375rem;
+  line-height: 1.3;
+  transition: transform 0.15s ease, border-color 0.15s ease;
+}
+
+.tag[aria-pressed="true"] {
+  border-color: var(--noren);
+  box-shadow: 0 0 0 2px var(--noren);
+}
+
+@media (prefers-color-scheme: dark) {
+  .tag[aria-pressed="true"] { border-color: var(--ink); box-shadow: 0 0 0 2px var(--ink); }
+}
+
+/* 图片模式：小票换成插图，每一行高一点，左右两列要一样高才对得齐 */
+.board.pic .plate, .board.pic .tag { min-height: 74px; }
+
+.tag.pic {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  overflow: hidden;
+  background: var(--porcelain);
+}
+
+/* 铺满小票，只裁掉盘子上下的空白，寿司就显得大 */
+.tag.pic img { width: 100%; height: 74px; object-fit: cover; object-position: 50% 58%; display: block; }
+
+.plate.done, .tag.done { cursor: default; }
+.plate.done { box-shadow: inset 0 0 0 3px var(--porcelain), inset 0 0 0 4.5px var(--rim); }
+.tag.done {
+  border-color: var(--rim);
+  border-left-width: 6px;
+  padding-left: 6px;
+}
+
+.wrong { animation: shake 0.35s ease; }
+
+@keyframes shake {
+  20%, 60% { transform: translateX(-5px); }
+  40%, 80% { transform: translateX(5px); }
+}
+
+/* 盘子转进来：一轮开始时唯一的入场动画 */
+.board.enter .plate { animation: slide-in 0.45s cubic-bezier(.2,.8,.3,1) both; }
+.board.enter li:nth-child(2) .plate { animation-delay: 0.06s; }
+.board.enter li:nth-child(3) .plate { animation-delay: 0.12s; }
+.board.enter li:nth-child(4) .plate { animation-delay: 0.18s; }
+.board.enter li:nth-child(5) .plate { animation-delay: 0.24s; }
+
+@keyframes slide-in {
+  from { transform: translateX(-110vw); }
+}
+
+/* ---------- 小知识和本轮总结 ---------- */
+
+.fact {
+  min-height: 72px;
+  margin-top: 20px;
+  padding: 12px 14px;
+  border-radius: 6px;
+  background: var(--surface);
+  border-left: 6px solid var(--rim, var(--steel-dark));
+  font-size: 0.9375rem;
+}
+
+.fact:empty { visibility: hidden; }
+
+.fact b {
+  font-family: var(--kana-font);
+  margin-right: 6px;
+}
+
+.summary {
+  margin-top: 20px;
+  padding: 16px;
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.summary h3 { margin: 0 0 4px; font-size: 1.0625rem; }
+.summary p { margin: 0 0 12px; color: var(--muted); font-size: 0.875rem; }
+
+.summary ul { margin: 0 0 16px; padding: 0; list-style: none; }
+
+.summary li {
+  display: grid;
+  grid-template-columns: 1.25rem 64px 1fr;
+  align-items: center;
+  column-gap: 8px;
+  padding: 8px 0;
+  border-top: 1px solid rgba(127, 140, 150, 0.25);
+}
+
+.summary .mark { font-weight: 700; }
+.summary .thumb { width: 64px; height: 51px; object-fit: contain; border-radius: 4px; background: var(--porcelain); }
+.summary .mark.miss { color: var(--tier-2); }
+.summary .mark.ok { color: var(--ok); }
+.summary .word { font-family: var(--kana-font); font-weight: 700; }
+.summary .meta { color: var(--muted); font-size: 0.8125rem; }
+
+.primary {
+  width: 100%;
+  border: 0;
+  border-radius: 999px;
+  padding: 12px;
+  background: var(--noren);
+  color: var(--noren-ink);
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  .primary { background: var(--noren-ink); color: var(--noren); }
+}
+
+.empty { color: var(--muted); }
+
+/* 答错过、转回来的盘子 */
+.plate .again {
+  position: absolute;
+  top: -9px;
+  right: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--noren);
+  color: var(--noren-ink);
+  font-size: 0.6875rem;
+  line-height: 1.6;
+}
+
+.fact .price {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--rim);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+  vertical-align: 0.1em;
+}
+
+/* ---------- 底部托盘：叠起来的盘子 ---------- */
+
+.tray {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+  background: var(--surface);
+  border-top: 1px solid rgba(127, 140, 150, 0.3);
+}
+
+.stack {
+  position: relative;
+  flex: none;
+  width: 56px;
+  height: 60px;
+}
+
+.stack span {
+  position: absolute;
+  left: 2px;
+  width: 52px;
+  height: 14px;
+  border-radius: 50%;
+  border: 3px solid var(--rim);
+  background: var(--porcelain);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.18);
+}
+
+.stack span.drop { animation: drop 0.35s cubic-bezier(.3,1.4,.5,1) both; }
+
+@keyframes drop {
+  from { transform: translateY(-40px); opacity: 0; }
+}
+
+.tray-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.3;
+}
+
+.tray-text b { font-size: 1.0625rem; }
+.tray-text span { color: var(--muted); font-size: 0.875rem; font-variant-numeric: tabular-nums; }
+
+.tray .primary {
+  width: auto;
+  margin-left: auto;
+  padding: 8px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.2;
+}
+
+.tray .primary span { font-family: var(--kana-font); }
+.tray .primary small { font-weight: 500; font-size: 0.6875rem; opacity: 0.8; }
+.primary:disabled { opacity: 0.4; cursor: default; }
+
+/* ---------- 结账单 ---------- */
+
+.bill {
+  width: min(420px, calc(100vw - 32px));
+  border: 0;
+  border-radius: 6px;
+  padding: 24px 20px 20px;
+  background: var(--porcelain);
+  color: #1c2b36;
+  border-top: 8px solid var(--noren);
+}
+
+.bill::backdrop { background: rgba(10, 20, 30, 0.55); }
+
+.bill h2 {
+  margin: 0;
+  font-family: var(--kana-font);
+  font-size: 1.5rem;
+  letter-spacing: 0.08em;
+}
+
+.bill .sub { margin: 4px 0 16px; color: #5c6b75; font-size: 0.875rem; }
+
+.bill table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.9375rem;
+}
+
+.bill td, .bill th { padding: 8px 0; border-bottom: 1px dashed #c3cbd0; text-align: left; }
+.bill td:nth-child(2) { color: #5c6b75; }
+.bill td:last-child { text-align: right; }
+
+.bill tfoot th, .bill tfoot td {
+  border-bottom: 0;
+  border-top: 2px solid #1c2b36;
+  font-size: 1.125rem;
+  font-weight: 700;
+}
+
+.bill .swatch {
+  display: inline-block;
+  width: 22px;
+  height: 9px;
+  margin-right: 8px;
+  border-radius: 50%;
+  border: 3px solid var(--rim);
+  vertical-align: 0.05em;
+}
+
+.bill .note { margin: 10px 0 0; color: #5c6b75; font-size: 0.8125rem; }
+.bill .note:empty { display: none; }
+
+.bill .actions { display: flex; flex-direction: column; gap: 8px; margin-top: 20px; }
+
+.bill .primary { background: var(--noren); color: var(--noren-ink); }
+
+.ghost {
+  border: 0;
+  background: transparent;
+  padding: 10px;
+  color: #5c6b75;
+  font-size: 0.9375rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

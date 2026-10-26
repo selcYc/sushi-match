@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 40" stroke="#1c2b36" stroke-width="2" stroke-linejoin="round" stroke-linecap="round">
+  <defs>
+    <clipPath id="body">
+      <path d="M6 20 C12 8 30 5 46 9 C56 12 62 16 64 20 C62 24 56 28 46 31 C30 35 12 32 6 20 Z"/>
+    </clipPath>
+  </defs>
+  <path d="M62 20 L76 7 L72 20 L76 33 Z" fill="#b9c3a4"/>
+  <!-- 鱼身比鲭鱼更高更扁，背偏黄绿 -->
+  <path d="M6 20 C12 8 30 5 46 9 C56 12 62 16 64 20 C62 24 56 28 46 31 C30 35 12 32 6 20 Z" fill="#e3e6e8"/>
+  <g clip-path="url(#body)" stroke="none">
+    <path d="M0 0 H70 V18 C50 16 30 16 0 19 Z" fill="#b9c3a4"/>
+  </g>
+  <!-- 侧线上的一排硬鳞（ぜいご），是认 あじ 的关键 -->
+  <path d="M14 21 C26 18 34 18 38 19 L41 22 L44 19 L47 22 L50 19 L53 22 L56 19 L59 22 L62 20" fill="none" stroke="#8a7a3a" stroke-width="1.8"/>
+  <path d="M6 20 C12 8 30 5 46 9 C56 12 62 16 64 20 C62 24 56 28 46 31 C30 35 12 32 6 20 Z" fill="none"/>
+  <circle cx="14" cy="17" r="2.2" fill="#1c2b36" stroke="none"/>
+</svg>

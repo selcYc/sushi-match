@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 96">
+  <defs>
+    <filter id="soft" x="-20%" y="-50%" width="140%" height="200%"><feGaussianBlur stdDeviation="0.8"/></filter>
+    <linearGradient id="plate" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#eef1f4"/>
+    </linearGradient>
+    <linearGradient id="cup" x1="0" y1="0" x2="1" y2="0.3"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#dde4eb"/></linearGradient>
+    <linearGradient id="custard" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fdf0c2"/><stop offset="1" stop-color="#f0d27c"/></linearGradient>
+  </defs>
+  <ellipse cx="60" cy="86" rx="42" ry="5" fill="#1c2b36" opacity="0.12"/>
+  <ellipse cx="60" cy="74" rx="44" ry="12" fill="#cfd6dc"/>
+  <ellipse cx="60" cy="72" rx="44" ry="12" fill="#f6f8fa"/>
+  <path d="M30 36 C31 60 44 74 60 74 C76 74 89 60 90 36 Z" fill="url(#cup)"/>
+  <path d="M33 50 C40 60 50 64 60 64 C70 64 80 60 87 50" fill="none" stroke="#2e4f8a" stroke-width="2"/>
+  <path d="M38 58 l4 -3 l4 3 l4 -3 l4 3 l4 -3 l4 3 l4 -3 l4 3 l4 -3 l4 3" fill="none" stroke="#2e4f8a" stroke-width="1"/>
+  <ellipse cx="60" cy="36" rx="30" ry="11" fill="#fbfcfd"/>
+  <ellipse cx="60" cy="37" rx="26.5" ry="9" fill="url(#custard)"/>
+  <path d="M42 34 C50 30 62 30 72 32" fill="none" stroke="#fff" stroke-width="2.4" opacity="0.6" stroke-linecap="round"/>
+  <g transform="translate(66 38)"><path d="M-6 1 C-6 -4 2 -6 6 -2 C3 -1 1 2 -2 3 C-4 3.5 -6 3 -6 1 Z" fill="#f58a6a"/>
+    <path d="M-4 0 C-2 -3 2 -3.5 4 -2" fill="none" stroke="#fff" stroke-width="1" opacity="0.8"/></g>
+  <g transform="translate(52 36)"><ellipse cx="-3" cy="0" rx="3.2" ry="2" fill="#5ea34a"/><ellipse cx="3" cy="0" rx="3.2" ry="2" fill="#5ea34a"/>
+    <ellipse cx="0" cy="-2.6" rx="2" ry="3" fill="#6fb655"/><path d="M0 0 L0 4" stroke="#3f7a2c" stroke-width="0.9"/></g>
+</svg>

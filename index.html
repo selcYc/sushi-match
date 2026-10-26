@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#23395b">
+  <title>回转寿司连线</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css?v=0.3.1">
+</head>
+<body>
+  <header class="noren">
+    <h1 data-i18n="title">回转寿司连线</h1>
+    <div class="seg" role="group" aria-label="Language">
+      <button type="button" data-ui="zh">中</button>
+      <button type="button" data-ui="en">EN</button>
+    </div>
+  </header>
+  <div class="belt" aria-hidden="true"></div>
+
+  <main>
+    <section class="controls">
+      <div class="row">
+        <span data-i18n="answer">右边显示</span>
+        <div class="seg" role="group">
+          <button type="button" data-answer="pic" data-i18n="pic">图</button>
+          <button type="button" data-answer="zh">中文</button>
+          <button type="button" data-answer="en">English</button>
+        </div>
+        <label class="check">
+          <input type="checkbox" id="romaji">
+          <span data-i18n="romaji">罗马字</span>
+        </label>
+      </div>
+      <div class="chips" id="chips"></div>
+    </section>
+
+    <section class="round">
+      <div class="round-head">
+        <h2 id="round-title"></h2>
+        <ol class="dots" id="dots" aria-hidden="true"></ol>
+      </div>
+      <p class="hint" id="hint" data-i18n="tapHint"></p>
+      <div class="board" id="board">
+        <svg class="lines" id="lines" aria-hidden="true"></svg>
+        <ul class="col" id="plates"></ul>
+        <ul class="col" id="tags"></ul>
+      </div>
+      <div class="fact" id="fact" aria-live="polite"></div>
+      <div class="summary" id="summary" hidden></div>
+    </section>
+  </main>
+
+  <footer class="tray">
+    <div class="stack" id="stack" aria-hidden="true"></div>
+    <div class="tray-text">
+      <b id="plate-count"></b>
+      <span id="plate-total"></span>
+    </div>
+    <button type="button" class="primary" id="checkout">
+      <span lang="ja" data-i18n="checkout">おあいそ</span>
+      <small data-i18n="checkoutHint">结账</small>
+    </button>
+  </footer>
+
+  <dialog class="bill" id="bill"></dialog>
+
+  <script src="app.js?v=0.3.1"></script>
+</body>
+</html>

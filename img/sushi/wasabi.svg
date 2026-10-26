@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 96">
+  <defs>
+    <filter id="soft" x="-20%" y="-50%" width="140%" height="200%"><feGaussianBlur stdDeviation="0.8"/></filter>
+    <linearGradient id="plate" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#eef1f4"/>
+    </linearGradient>
+    <linearGradient id="w" x1="0" y1="0" x2="0.3" y2="1"><stop offset="0" stop-color="#a8d266"/><stop offset="1" stop-color="#5f9a35"/></linearGradient>
+  </defs>
+  <ellipse cx="60" cy="90" rx="52" ry="5" fill="#1c2b36" opacity="0.10"/>
+  <ellipse cx="60" cy="63" rx="56" ry="27" fill="#cfd6dc"/>
+  <ellipse cx="60" cy="60" rx="56" ry="27" fill="url(#plate)"/>
+  <ellipse cx="60" cy="61.5" rx="44" ry="19.5" fill="#e8ecf0"/>
+  <ellipse cx="60" cy="60.5" rx="43" ry="18.5" fill="#f6f8fa"/>
+  <path d="M10 56 C18 42 38 35 60 34" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/>
+  <g transform="translate(60 56) scale(1.5) translate(-60 -56)">
+  <ellipse cx="60" cy="62" rx="16" ry="5" fill="#1c2b36" opacity="0.12"/>
+  <path d="M44 60 C42 52 50 46 56 44 C60 40 62 34 66 33 C66 38 64 42 68 45 C76 48 78 56 74 60 C68 65 50 65 44 60 Z" fill="url(#w)"/>
+  <path d="M50 52 C54 48 60 47 64 48 M48 58 C56 56 66 57 72 55" fill="none" stroke="#b9dc84" stroke-width="1.4" opacity="0.8" stroke-linecap="round"/>
+  <circle cx="68" cy="61.1" r="0.4" fill="#4f8a2a" opacity="0.6"/><circle cx="68.3" cy="61.8" r="0.5" fill="#4f8a2a" opacity="0.6"/><circle cx="47" cy="51.2" r="0.8" fill="#4f8a2a" opacity="0.6"/><circle cx="68.8" cy="51" r="0.7" fill="#4f8a2a" opacity="0.6"/><circle cx="68.2" cy="51.5" r="0.5" fill="#4f8a2a" opacity="0.6"/><circle cx="64.7" cy="60.5" r="0.5" fill="#4f8a2a" opacity="0.6"/><circle cx="61.9" cy="51.1" r="0.7" fill="#4f8a2a" opacity="0.6"/><circle cx="70.1" cy="61.1" r="0.7" fill="#4f8a2a" opacity="0.6"/><circle cx="62.2" cy="61.6" r="0.7" fill="#4f8a2a" opacity="0.6"/><circle cx="55.9" cy="54.2" r="0.5" fill="#4f8a2a" opacity="0.6"/><circle cx="46.2" cy="51.1" r="0.5" fill="#4f8a2a" opacity="0.6"/><circle cx="59.4" cy="61.5" r="0.6" fill="#4f8a2a" opacity="0.6"/><circle cx="47.9" cy="56.7" r="0.4" fill="#4f8a2a" opacity="0.6"/><circle cx="61.7" cy="57.3" r="0.6" fill="#4f8a2a" opacity="0.6"/><circle cx="56.2" cy="56.9" r="0.7" fill="#4f8a2a" opacity="0.6"/><circle cx="63.6" cy="56.8" r="0.6" fill="#4f8a2a" opacity="0.6"/><circle cx="61.7" cy="47.7" r="0.6" fill="#4f8a2a" opacity="0.6"/><circle cx="46.8" cy="51.2" r="0.5" fill="#4f8a2a" opacity="0.6"/><circle cx="60.3" cy="46.7" r="0.6" fill="#4f8a2a" opacity="0.6"/><circle cx="66.2" cy="60.7" r="0.8" fill="#4f8a2a" opacity="0.6"/><circle cx="58" cy="56.3" r="0.7" fill="#4f8a2a" opacity="0.6"/><circle cx="60.1" cy="49.3" r="0.6" fill="#4f8a2a" opacity="0.6"/><circle cx="50.2" cy="46.1" r="0.6" fill="#4f8a2a" opacity="0.6"/><circle cx="68.5" cy="60.5" r="0.8" fill="#4f8a2a" opacity="0.6"/><circle cx="54.7" cy="55.4" r="0.7" fill="#4f8a2a" opacity="0.6"/><circle cx="51.2" cy="58.9" r="0.7" fill="#4f8a2a" opacity="0.6"/>
+  <path d="M52 49 l4 -0.7" stroke="#fff" stroke-width="1.1" stroke-linecap="round" opacity="0.9"/><path d="M62 38 l2.5 -0.4" stroke="#fff" stroke-width="1" stroke-linecap="round" opacity="0.9"/>
+  </g>
+</svg>
