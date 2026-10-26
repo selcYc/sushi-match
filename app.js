@@ -147,17 +147,32 @@ function pool() {
   return state.words.filter((w) => cats.length === 0 || cats.includes(w.cat));
 }
 
-// 抽词：先放几个转回来的错题，剩下的从洗好的「袋子」里抽，抽完一遍再重新洗
+// 抽词：先放几个转回来的错题，剩下的从洗好的「袋子」里抽，抽完一遍再重新洗。
+// 同一「相似组」（group，比如油甘鱼 / 鰤鱼 / 红甘）的词尽量不放在同一轮：
+// 实物本来就难分，放在一起考的是眼力而不是认词
 function drawRound() {
   const ids = pool().map((w) => w.id);
   const again = shuffle(state.progress.review.filter((id) => ids.includes(id))).slice(0, REVIEW_PER_ROUND);
   state.bag = state.bag.filter((id) => ids.includes(id) && !again.includes(id));
-  const need = ROUND_SIZE - again.length;
-  if (state.bag.length < need) {
+  if (state.bag.length < ROUND_SIZE * 2) {
     state.bag.push(...shuffle(ids.filter((id) => !state.bag.includes(id) && !again.includes(id))));
   }
-  const picked = shuffle([...again, ...state.bag.splice(0, need)]);
-  return picked.map(word);
+
+  const picked = [];
+  const groups = new Set();
+  const clash = (id) => word(id).group && groups.has(word(id).group);
+  const take = (id) => {
+    picked.push(id);
+    if (word(id).group) groups.add(word(id).group);
+  };
+  for (const id of again) if (!clash(id)) take(id);
+  for (let i = 0; i < state.bag.length && picked.length < ROUND_SIZE; ) {
+    if (clash(state.bag[i])) i++;
+    else take(state.bag.splice(i, 1)[0]);
+  }
+  // 选的分类里不同组的词不够一轮（比如只选了虾蟹乌贼），才允许同组的一起出
+  while (picked.length < ROUND_SIZE && state.bag.length) take(state.bag.shift());
+  return shuffle(picked).map(word);
 }
 
 /* ---------- 渲染 ---------- */
