@@ -24,6 +24,8 @@
   --en-font: "Zen Maru Gothic", var(--zh-font);
 }
 
+:root { color-scheme: light dark; }
+
 :lang(zh) { font-family: var(--zh-font); }
 :lang(en) { font-family: var(--en-font); }
 :lang(ja) { font-family: var(--kana-font); }

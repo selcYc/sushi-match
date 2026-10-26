@@ -402,6 +402,14 @@ HOTATE_SIDE = ("M-32 3 C-32 9 -18 12 0 12 C18 12 32 9 32 3 C32.5 8 31 13 26 15 "
                "C18 17.5 -18 17.5 -26 15 C-31 13 -32.5 8 -32 3 Z")
 
 
+ENGAWA = ("M-34 4 C-34 -2 -24 -8 -2 -8.5 C16 -8.8 30 -4 36 3 "
+          "C30 3 16 5.5 -2 6.5 C-16 7.2 -26 8.5 -31 8 C-33.5 7.6 -34 6 -34 4 Z")
+ENGAWA_SIDE = ("M-34 4 C-34 6 -33.5 7.6 -31 8 C-26 8.5 -16 7.2 -2 6.5 C16 5.5 30 3 36 3 "
+               "C36.5 6 35 8.5 32 9 C24 8.5 14 9.5 -2 10 C-16 10.6 -26 13.5 -31 13.8 C-34 14 -35 9 -34 4 Z")
+IKA = "M-30 -9 Q-30 -12 -27 -12 H28 Q31 -12 31 -9 V8 Q31 11 28 11 H-27 Q-30 11 -30 8 Z"
+IKA_SIDE = "M-30 8 Q-30 11 -27 11 H28 Q31 11 31 8 V11 Q31 14 28 14 H-27 Q-30 14 -30 11 Z"
+
+
 def crosshatch(color, step=3.5, width=0.6, opacity=0.9):
     out = ""
     for k in range(-14, 14):
@@ -608,14 +616,21 @@ ITEMS.update({
                 pattern=back_band("url(#skin)", -5)
                 + '<path d="M-40 -5 C-10 -9 15 -9.5 40 -6" fill="none" stroke="#ffffff" stroke-width="1.4" opacity="0.9"/>'
                 + marbling(range(-26, 34, 9), "#ffffff", (0.8,), 0.6) + STD_GLINTS),
-    "hirame": dict(kind=nigiri, light="#ffffff", base="#f2f1ec", shadow="#d6d4cc",
-                   pattern=marbling(range(-28, 34, 6), "#ffffff", (0.9,), 0.7) + ridge_light() + STD_GLINTS,
-                   over=f'<g transform="translate(2 -3)">{momiji_chives()}</g>'),
-    "engawa": dict(kind=nigiri, light="#fffaf0", base="#f3e8d4", shadow="#d6c29e",
+    # 比目鱼：通透的白色月牙，靠正中间放大的红叶萝卜泥 + 葱来认
+    "hirame": dict(kind=nigiri, light="#ffffff", base="#eeedea", shadow="#cdd0d3",
+                   pattern='<ellipse cx="2" cy="1" rx="22" ry="6" fill="#dfe3e8" opacity="0.6" filter="url(#soft)"/>'
+                   + "".join(f'<path d="M-32 8 Q{x - 10} -2 {x} -14" fill="none" stroke="#ffffff" stroke-width="0.9" opacity="0.75"/>'
+                             for x in range(-24, 40, 7))
+                   + ridge_light(opacity=0.5) + STD_GLINTS,
+                   over=f'<g transform="translate(0 -3) scale(1.6)">{momiji_chives()}</g>'),
+    # 鳍边肉：窄长的一条奶黄色，表面一道道粗横纹（下面露出更多米饭）
+    "engawa": dict(kind=nigiri, light="#fffcf0", base="#f4e9cc", shadow="#d6bf8d", side="#cdb582",
+                   shape=ENGAWA, side_shape=ENGAWA_SIDE,
                    pattern="".join(
-                       f'<path d="M{f(x + 3)} -14 C{f(x)} -6 {f(x + 2)} 4 {f(x - 1)} 13" fill="none" stroke="#d8c39b" stroke-width="1.1"/>'
-                       f'<path d="M{f(x + 4.4)} -14 C{f(x + 1.4)} -6 {f(x + 3.4)} 4 {f(x + 0.4)} 13" fill="none" stroke="#ffffff" stroke-width="0.8" opacity="0.8"/>'
-                       for x in [k * 3.2 for k in range(-11, 12)]) + STD_GLINTS),
+                       f'<path d="M{f(x + 2)} -12 C{f(x)} -5 {f(x + 1.5)} 2 {f(x - 0.5)} 9" fill="none" stroke="#d6bd88" stroke-width="1.8"/>'
+                       f'<path d="M{f(x + 3.6)} -12 C{f(x + 1.6)} -5 {f(x + 3.1)} 2 {f(x + 1.1)} 9" fill="none" stroke="#ffffff" stroke-width="1" opacity="0.9"/>'
+                       for x in [k * 4 for k in range(-9, 10)])
+                   + ridge_light(opacity=0.5) + STD_GLINTS),
     "hamachi": dict(kind=nigiri, light="#fff3ec", base="#f6d5c6", shadow="#dcab98",
                     pattern=chiai("#c4525c", "M-36 -16 H8 C-2 -11 -18 -8 -36 -5 Z") + ridge_light() + STD_GLINTS),
     "buri": dict(kind=nigiri, light="#fff0e6", base="#f0cab5", shadow="#d39c85",
@@ -644,7 +659,8 @@ ITEMS.update({
                   over=scallions([(-6, -4), (0, -6), (6, -4.5), (-2, -1), (4, 0)], r=2.3)),
     # 贝类
     "hotate": dict(kind=nigiri, light="#fffdf6", base="#f6ecdc", shadow="#d9c6a8", shape=HOTATE, side_shape=HOTATE_SIDE, drape=False,
-                   pattern="".join(f'<path d="M{x} -14 C{x + 1} -4 {x - 1} 5 {x} 13" fill="none" stroke="#eadabb" stroke-width="0.8"/>' for x in range(-28, 30, 4))
+                   # 纹路很淡：扇贝看起来是一整块光滑圆润的贝肉，免得和有粗横纹的鳍边肉混
+                   pattern="".join(f'<path d="M{x} -14 C{x + 1} -4 {x - 1} 5 {x} 13" fill="none" stroke="#eadabb" stroke-width="0.7" opacity="0.4"/>' for x in range(-28, 30, 6))
                    + '<path d="M0 -13 C1 -3 -1 6 0 12" fill="none" stroke="#e2cfac" stroke-width="1.3"/>'
                    + ridge_light(opacity=0.5) + STD_GLINTS),
     "akagai": dict(kind=nigiri, light="#ff9d74", base="#ee5d3a", shadow="#c03a22",
@@ -683,8 +699,14 @@ ITEMS.update({
                  defs=grad("crab", [(0, "#e8432c"), (1, "#ff9a7a")]),
                  pattern="".join(f'<path d="M-40 {y} C-10 {y - 2} 15 {y - 2.5} 40 {y - 1}" fill="none" stroke="#e8ddd2" stroke-width="0.7"/>' for y in range(0, 12, 2))
                  + back_band("url(#crab)", -2) + STD_GLINTS),
-    "ika": dict(kind=nigiri, light="#ffffff", base="#f7f8f6", shadow="#d3d9df", side="#e2e7ec",
-                pattern=crosshatch("#dfe4e9", step=3.5, width=0.6) + ridge_light(opacity=0.6) + STD_GLINTS),
+    # 鱿鱼：切成方方正正的一片，雪白、很亮，一个方向的细斜刀纹
+    "ika": dict(kind=nigiri, light="#ffffff", base="#f5f8fb", shadow="#bccad8", side="#b9c7d5",
+                shape=IKA, side_shape=IKA_SIDE, drape=False,
+                pattern="".join(f'<path d="M{x} -14 l9 28" stroke="#c7d2de" stroke-width="0.9"/>' for x in range(-40, 36, 5))
+                # 白色放在白盘上会糊成一片：边缘压一圈冷灰，轮廓才出得来
+                + f'<path d="{IKA}" fill="none" stroke="#a9b8c8" stroke-width="3.5" opacity="0.7" filter="url(#soft)"/>'
+                + '<path d="M-28 -8 H26" stroke="#ffffff" stroke-width="3.5" opacity="0.8" filter="url(#soft)" stroke-linecap="round"/>'
+                + glints([(-24, -9, 7, 1.4), (-8, -9.5, 5, 1.3), (10, -9, 8, 1.4), (-18, 5, 4, 1)])),
     "tako": dict(kind=nigiri, light="#ffffff", base="#f6edf0", shadow="#dcc4cb", side="#9b3550",
                  defs=grad("skin", [(0, "#7e2240"), (1, "#c45a7a")]),
                  pattern=back_band("url(#skin)", -3) + suckers() + STD_GLINTS),
