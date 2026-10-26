@@ -749,6 +749,144 @@ ITEMS.update({
 })
 
 
+# ---------- 每种寿司自己的外形 ----------
+# 大部分握寿司原本共用同一个月牙形，只换颜色和花纹，看起来都差不多。
+# 这里按实物的切法给每种画出自己的轮廓：用上下两条边缘曲线描述一片鱼，
+# 自动生成顶面和前缘露出来的侧面。
+
+# 屏幕上的「往下」，换算到一贯寿司自己的坐标里（抵消 rotate(-30) 和 scale(0.86)）
+DOWN = (-0.58, 1.0)
+
+
+def poly(points):
+    return "M" + " L".join(f"{f(x)} {f(y)}" for x, y in points) + " Z"
+
+
+def slice_shape(x0, x1, top, bot, drop, n=64):
+    """top(t) / bot(t)：t 从 0 到 1（左到右）处上、下边缘的 y；drop(t)：这一处侧面露出来的厚度。
+    返回（顶面路径，侧面路径）。"""
+    pts = [(x0 + (x1 - x0) * i / n, i / n) for i in range(n + 1)]
+    T = [(x, top(t)) for x, t in pts]
+    B = [(x, bot(t)) for x, t in pts]
+    D = [(x + DOWN[0] * drop(t), y + DOWN[1] * drop(t)) for (x, y), (_, t) in zip(B, pts)]
+    return poly(T + B[::-1]), poly(B + D[::-1])
+
+
+def sinp(t, p):
+    return max(0.0, math.sin(math.pi * t)) ** p
+
+
+def slab(half_top, half_bot, arch=1.2, r=2.5, corner=0.06):
+    """厚切的方块：上缘微微拱起，两头是平的切口，四角稍圆。"""
+    def rounding(t):
+        return r * (max(0, 1 - t / corner) ** 2 + max(0, 1 - (1 - t) / corner) ** 2)
+    return (lambda t: -half_top - arch * sinp(t, 1) + rounding(t),
+            lambda t: half_bot + 0.4 * arch * sinp(t, 1) - rounding(t))
+
+
+def ends_drop(base, extra, p=1.5):
+    """两头搭在饭团外面往下垂：中间薄、两头厚。"""
+    return lambda t: base + extra * (1 - sinp(t, 1)) ** p
+
+
+def inner_rim(shape, color, width=4, opacity=0.5):
+    """沿着轮廓内侧压一圈颜色（边缘变暗或变亮）。"""
+    return f'<path d="{shape}" fill="none" stroke="{color}" stroke-width="{width}" opacity="{opacity}" filter="url(#soft)"/>'
+
+
+def reshape(name, shape_side, **extra):
+    shape, side = shape_side
+    ITEMS[name].update(shape=shape, side_shape=side, **extra)
+    return shape
+
+
+# 金枪鱼系：厚切方块，侧面露出切口
+TUNA = slice_shape(-30, 31, *slab(11, 9.5), lambda t: 4.5)
+for name in ("maguro", "chutoro", "otoro"):
+    reshape(name, TUNA, drape=False)
+reshape("katsuo", slice_shape(-30, 31, *slab(11, 9.5), lambda t: 5.5), drape=False, side="#8e1d2c")
+
+# 鲭鱼：醋腌后切成厚块，侧面是白色的鱼肉断面
+reshape("saba", slice_shape(-29, 30, *slab(10, 9), lambda t: 6), drape=False)
+
+# 光物：整片鱼片，两头尖
+reshape("aji", slice_shape(-36, 37, lambda t: -11 * sinp(t, 0.55) * (1 - 0.15 * t), lambda t: 9.5 * sinp(t, 0.55),
+                           ends_drop(2, 4)))
+IWASHI = reshape("iwashi", slice_shape(-38, 38, lambda t: -8.5 * sinp(t, 0.5), lambda t: 7.5 * sinp(t, 0.5), ends_drop(2, 5)))
+ITEMS["iwashi"]["pattern"] = (back_band("url(#back)", -0.5)
+                              # 沙丁鱼的标志：侧面一排大黑点（竹荚鱼没有）
+                              + "".join(f'<circle cx="{x}" cy="{f(1 - abs(x) * 0.02)}" r="1.7" fill="#1a2733"/>' for x in range(-27, 30, 6))
+                              + glints([(-20, -5, 4, 1.1), (-4, -6.5, 5, 1.2), (12, -5.5, 3.5, 1)]))
+reshape("sanma", slice_shape(-44, 44, lambda t: -7 * sinp(t, 0.45), lambda t: 6.5 * sinp(t, 0.45), ends_drop(2, 6)))
+ITEMS["sanma"]["pattern"] = (back_band("url(#back)", 0.5)
+                             + '<path d="M-44 1.5 C-10 -0.5 15 -1 44 0.5" fill="none" stroke="#ffffff" stroke-width="1.4"/>'
+                             + glints([(-24, -4, 5, 1.1), (-6, -5, 6, 1.2), (14, -4.5, 4, 1)]))
+ITEMS["sanma"]["over"] = scallions([(-5, -3.5), (1, -4.5), (6, -3), (-1, 0)], r=2)
+# 斑鰶：鱼片尾端留着分叉的鱼尾
+reshape("kohada", slice_shape(-32, 32, lambda t: -10 * sinp(t, 0.55), lambda t: 9 * sinp(t, 0.55), ends_drop(2, 4)),
+        under='<path d="M28 -1 L43 -10 L39 0.5 L43 10 L28 2.5 Z" fill="#8f9c9a"/>'
+              '<path d="M31 0 L41 -7 M31 1.5 L41 7" stroke="#5f6c6a" stroke-width="0.8"/>')
+
+# 赤贝：展开成蝴蝶形，边缘是一圈褶边，中间一道切口
+AKAGAI = reshape("akagai", slice_shape(
+    -33, 34,
+    lambda t: -(10.5 + 1.3 * math.sin(t * math.pi * 14)) * sinp(t, 0.45),
+    lambda t: (9.5 + 1.3 * math.sin(t * math.pi * 14 + 1.3)) * sinp(t, 0.45),
+    ends_drop(2.5, 3)))
+ITEMS["akagai"]["pattern"] = (inner_rim(AKAGAI, "#ffc3a3", 2.6, 0.9)
+                              + '<path d="M-24 -1 C-8 -3 8 -3 26 -1" fill="none" stroke="#a82a17" stroke-width="1.4"/>'
+                              + ridge_light() + STD_GLINTS)
+# 海螺：薄片，边缘呈波浪，外圈是深灰褐色
+TSUBU = reshape("tsubugai", slice_shape(
+    -32, 33,
+    lambda t: -(10 + 0.9 * math.sin(t * math.pi * 9)) * sinp(t, 0.5),
+    lambda t: (9 + 0.9 * math.sin(t * math.pi * 9 + 2)) * sinp(t, 0.5),
+    ends_drop(2, 3)))
+ITEMS["tsubugai"]["pattern"] = (inner_rim(TSUBU, "#7d6c58", 6, 0.6)
+                                + "".join(f'<path d="M{x} -8 l1 4" stroke="#dcd2c1" stroke-width="0.8"/>' for x in range(-22, 26, 4))
+                                + STD_GLINTS)
+# 北极贝：一头宽、一头收成尖尖的鸟嘴，尖端是红的，中间一道切口
+reshape("hokkigai", slice_shape(
+    -32, 37,
+    lambda t: -12 * (1 - t ** 2) ** 0.8 * sinp(t, 0.25),
+    lambda t: 10 * (1 - t ** 2) ** 0.8 * sinp(t, 0.25),
+    ends_drop(2, 3)))
+ITEMS["hokkigai"]["pattern"] = ('<path d="M2 -16 H40 V16 H2 Z" fill="url(#tip)" filter="url(#soft)"/>'
+                                '<path d="M8 -0.5 L37 0" stroke="#ffffff" stroke-width="1.2"/>'
+                                '<path d="M8 0.5 L37 0.5" stroke="#b8323f" stroke-width="0.8" opacity="0.6"/>' + STD_GLINTS)
+# 鲍鱼：厚厚的椭圆一片，表面交叉刀纹，外圈颜色深
+AWABI = reshape("awabi", slice_shape(-26, 26, lambda t: -12.5 * sinp(t, 0.5), lambda t: 11 * sinp(t, 0.5), lambda t: 4), drape=False)
+ITEMS["awabi"]["pattern"] = (crosshatch("#b5a674", step=4, width=0.7) + inner_rim(AWABI, "#6e6a40", 4) + STD_GLINTS)
+
+# 螃蟹：两根蟹腿并排，每根上面红、下面白，带纤维
+reshape("kani", slice_shape(-33, 34, lambda t: -10.5 * sinp(t, 0.25), lambda t: 10 * sinp(t, 0.25), lambda t: 3), drape=False)
+ITEMS["kani"]["pattern"] = (
+    "".join(f'<path d="M-40 {y} H40" stroke="#e6dbd0" stroke-width="0.7"/>' for y in (-3, -1.5, 6, 7.5, 9))
+    + '<path d="M-40 -12 H40 V-4.5 C20 -5.5 -10 -5 -40 -4 Z" fill="url(#crab)"/>'
+    + '<path d="M-40 0 H40 V4.5 C20 3.5 -10 4 -40 5 Z" fill="url(#crab)"/>'
+    + '<path d="M-40 -0.2 H40" stroke="#c9bdb1" stroke-width="1.2"/><path d="M-40 0.8 H40" stroke="#ffffff" stroke-width="0.8"/>'
+    + glints([(-20, -9, 6, 1.3), (6, -9, 5, 1.2), (-12, 1.5, 6, 1.2), (14, 1.5, 4, 1)]))
+
+# 章鱼：上缘被吸盘撑得一鼓一鼓的，紫红色的皮
+TAKO_TOP = lambda t: -(10 + 1.6 * abs(math.sin(t * math.pi * 7))) * sinp(t, 0.5)
+reshape("tako", slice_shape(-33, 34, TAKO_TOP, lambda t: 9 * sinp(t, 0.5), ends_drop(2, 3)))
+ITEMS["tako"]["pattern"] = (back_band("url(#skin)", -3)
+                            + "".join(
+                                f'<circle cx="{f(-33 + 67 * t)}" cy="{f(TAKO_TOP(t) + 3.2)}" r="2.2" fill="#f2c4d0"/>'
+                                f'<circle cx="{f(-33 + 67 * t)}" cy="{f(TAKO_TOP(t) + 3.2)}" r="1" fill="#d996aa"/>'
+                                for t in [(i + 0.5) / 7 for i in range(1, 6)])
+                            + STD_GLINTS)
+
+# 星鳗：又长又软，边缘蓬松，两头大幅垂下来
+reshape("anago", slice_shape(
+    -39, 40,
+    lambda t: -(12.5 + 0.8 * math.sin(t * math.pi * 11)) * sinp(t, 0.3),
+    lambda t: (11 + 0.8 * math.sin(t * math.pi * 9 + 1)) * sinp(t, 0.3),
+    ends_drop(3, 7)))
+# 鳗鱼：方正的鱼片，带烤痕和海苔带
+reshape("unagi", slice_shape(-31, 32, *slab(10.5, 9.5, arch=0.6, r=2), lambda t: 3), drape=False)
+
+
 def main():
     import json
     OUT.mkdir(parents=True, exist_ok=True)
