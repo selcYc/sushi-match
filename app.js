@@ -105,7 +105,7 @@ function t(key, vars = {}) {
 
 const word = (id) => state.words.find((w) => w.id === id);
 // 插图更新时改这个版本号，让手机重新下载，不用缓存里的旧图（和 index.html 里 css/js 的版本号一起改）
-const ASSET_VERSION = "0.6";
+const ASSET_VERSION = "0.8";
 const picture = (id) => `img/sushi/${id}.svg?v=${ASSET_VERSION}`;
 
 // 右边小票的内容：图片模式放插图（alt 用当前界面语言的意思），否则放文字

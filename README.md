@@ -29,7 +29,8 @@ python -m http.server 8790
 | `img/sushi/<id>.svg` | 每个词的插图（「图」模式和本轮总结里用），由脚本生成，不要手改 |
 | `tools/draw_sushi.py` | 生成插图的脚本 |
 | `samples.html` | 插图一览，按分类列出全部插图 |
-| `docs/illustration-research.md` | 插图画法的调研笔记 |
+| `docs/illustration-research.md` | 第一轮插图调研（扁平插画） |
+| `docs/illustration-plan.md` | 第二轮调研（回转寿司店实物照片）和现在的画法依据 |
 
 ## 插图
 
@@ -63,4 +64,5 @@ python tools/draw_sushi.py
 
 - `tier` 是价格档位，决定盘子颜色：0 白盘免费，1 蓝 ¥120，2 红 ¥180，3 紫 ¥260，4 金 ¥360（价格在 `app.js` 的 `TIERS` 里）
 - `kanji` 没有汉字写法时填 `null`（v0.3 的汉字陷阱关会用到）
+- `group`（可选）是「相似组」：实物本来就很难分的几种（比如油甘鱼 / 鰤鱼 / 红甘）填同一个值，抽题时尽量不放在同一轮
 - 每个分类至少要有 5 个词，否则单选这个分类时凑不够一轮

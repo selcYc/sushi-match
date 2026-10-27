@@ -1,898 +1,937 @@
-"""生成寿司插图：斜俯视的盘子上，斜着摆两贯（卷物是三块）。
+"""生成寿司插图：约 30° 的侧前方视角，盘子上左右并排两贯。
 
 用法：python tools/draw_sushi.py
-输出到 img/sushi/<id>.svg
+输出到 img/sushi/<id>.svg，最后对照题库检查有没有漏画的词。
 
-画法参考了图库里辨识度高的回转寿司插画（调研见 docs/illustration-research.md）：
-- 不描黑边，靠「亮面 / 固有色 / 暗面」三档色块分出形体
-- 鱼片是一头宽一头尖的「楔形」，拱在米饭上，尖头往下垂
-- 每种寿司只抓一两个最有辨识度的特征，并且放大（三文鱼的白纹、虾尾、葱花……）
-- 高光用几道短短的白色小笔触，显得新鲜、湿润
-- 米饭大部分被盖住，只露出底下一圈，带一点冷色阴影
+依据见 docs/illustration-plan.md（第二轮调研：回转寿司店的实物照片 + いらすとや 等插画）：
+- 握寿司是鱼片「趴」在饭团上：比饭团长，中间被顶起，两头顺势垂到盘子
+- 分辨靠「轮廓 + 皮边色带 + 配料」，每种只放大 1～2 个线索
+- 每样东西都有一条比本色深一档的细描边，白色寿司放在白盘子上也有边界
 
-每种寿司在一贯自己的坐标里描述（长轴横放，宽头在左，x 约 -33..34，y 约 -12..11），
-盘子、米饭、厚度、旋转都由这里统一处理。
+做法：用很简单的 3D 模型再投影到屏幕上（从 30° 仰角看，整贯在水平面上转一点）。
+鱼片表面用 (u, v) 描述：u 从 0 到 1 是从左头到右头，v 从 -1 到 1 是从后边缘到前边缘。
+花纹、色带、配料都按 (u, v) 放，会跟着弯曲的表面走。
 """
 
+import json
 import math
 import random
 from pathlib import Path
 
-OUT = Path(__file__).resolve().parent.parent / "img" / "sushi"
+ROOT = Path(__file__).resolve().parent.parent
+OUT = ROOT / "img" / "sushi"
 
-ANGLE = -30  # 斜放角度：左下到右上
-SCALE = 0.86
-PAIR = [(52, 44), (68, 60)]
+VIEW = "0 24 120 70"
+ELEV = math.radians(30)  # 从 30° 仰角往下看
+COS_E, SIN_E = math.cos(ELEV), math.sin(ELEV)
+YAW = math.radians(-16)  # 整贯在水平面上转一点，看到的是斜 3/4 面
+# 两贯左右并排、前后错开：后面那贯偏左上，前面那贯偏右下
+PAIR = [(44, 61), (75, 72)]
 
-# 鱼片：拱在米饭上的月牙形，中间高、两头往下垂；左头宽，右头收尖
-WEDGE = ("M-34 6 C-34 -4 -22 -13 -2 -13.5 C16 -13.8 30 -6 37 5 "
-         "C30 4.5 16 8 -2 9.5 C-16 10.6 -26 12 -31 11.2 C-33.5 10.6 -34 8.5 -34 6 Z")
-# 鱼片前缘露出来的侧面：沿着前缘往下一条带子，两头垂得多、中间少
-SIDE = ("M-34 6 C-34 8.5 -33.5 10.6 -31 11.2 C-26 12 -16 10.6 -2 9.5 C16 8 30 4.5 37 5 "
-        "C37.5 8 36 10.5 33 11 C24 10 14 11.5 -2 12.2 C-16 13 -26 16.5 -31 16.8 C-34 17 -35 12 -34 6 Z")
-# 两头垂下去的地方颜色更暗
-END_SHADE = ('<ellipse cx="-31" cy="6" rx="7" ry="10" fill="{c}" opacity="0.45" filter="url(#soft)"/>'
-             '<ellipse cx="32" cy="3" rx="6" ry="6" fill="{c}" opacity="0.45" filter="url(#soft)"/>')
 
-COMMON_DEFS = """    <filter id="soft" x="-20%" y="-50%" width="140%" height="200%"><feGaussianBlur stdDeviation="0.8"/></filter>
-    <linearGradient id="plate" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#eef1f4"/>
-    </linearGradient>
-"""
-
+# ---------- 基础 ----------
 
 def f(n):
     return f"{n:.1f}".rstrip("0").rstrip(".")
-
-
-def bumpy_ellipse(rx, ry, n, seed, bump=(0.3, 0.9)):
-    """边缘一粒粒鼓起来的椭圆，用来画米饭。"""
-    rnd = random.Random(seed)
-    pts = [(rx * math.cos(2 * math.pi * i / n), ry * math.sin(2 * math.pi * i / n)) for i in range(n)]
-    d = f"M{f(pts[0][0])} {f(pts[0][1])}"
-    for i in range(n):
-        a = 2 * math.pi * (i + 0.5) / n
-        mx, my = rx * math.cos(a), ry * math.sin(a)
-        nx, ny = math.cos(a) / rx, math.sin(a) / ry
-        k = math.hypot(nx, ny)
-        b = rnd.uniform(*bump) * 1.6
-        x, y = pts[(i + 1) % n]
-        d += f" Q{f(mx + nx / k * b)} {f(my + ny / k * b)} {f(x)} {f(y)}"
-    return d + " Z"
-
-
-def grain_marks(seed, count, xr, yr, color="#cdd4dc"):
-    """米饭上几道短短的弧线，暗示一粒粒的米。"""
-    rnd = random.Random(seed)
-    out = ""
-    for _ in range(count):
-        x, y = rnd.uniform(*xr), rnd.uniform(*yr)
-        out += (f'<path d="M{f(x)} {f(y)} q1.4 {f(rnd.uniform(0.6, 1.2))} 2.8 0" transform="rotate({rnd.randint(-30, 30)} {f(x)} {f(y)})" '
-                f'fill="none" stroke="{color}" stroke-width="0.8" stroke-linecap="round"/>')
-    return out
-
-
-def glints(points):
-    """湿润感：几道白色小笔触。"""
-    return "".join(
-        f'<path d="M{f(x)} {f(y)} l{f(l)} {f(-l * 0.18)}" stroke="#fff" stroke-width="{f(w)}" stroke-linecap="round" opacity="0.9"/>'
-        for x, y, l, w in points
-    )
-
-
-def svg(defs, body):
-    return (
-        # 上面 10 个单位是空白（最高的虾尾也在 y=15 以下），裁掉，同样高度下寿司显得更大
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 10 120 86">\n'
-        f"  <defs>\n{COMMON_DEFS}{defs}  </defs>\n{body}</svg>\n"
-    )
-
-
-def plate():
-    return """  <ellipse cx="60" cy="90" rx="52" ry="5" fill="#1c2b36" opacity="0.10"/>
-  <ellipse cx="60" cy="63" rx="56" ry="27" fill="#cfd6dc"/>
-  <ellipse cx="60" cy="60" rx="56" ry="27" fill="url(#plate)"/>
-  <ellipse cx="60" cy="61.5" rx="44" ry="19.5" fill="#e8ecf0"/>
-  <ellipse cx="60" cy="60.5" rx="43" ry="18.5" fill="#f6f8fa"/>
-  <path d="M10 56 C18 42 38 35 60 34" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/>
-"""
-
-
-def layer(x, y, dy, content):
-    """把一层内容放到 (x, y)，先往下挪 dy（屏幕方向），再斜着转。"""
-    return f'  <g transform="translate({f(x)} {f(y + dy)}) rotate({ANGLE}) scale({SCALE})">{content}</g>\n'
-
-
-def rice(x, y, seed):
-    """米饭：冷灰色的底 + 白色的饭团，只露出鱼片下面那一圈。"""
-    mound = bumpy_ellipse(23, 11.5, 44, seed)
-    out = layer(x, y, 10.5, f'<path d="{mound}" fill="#d3d9e1"/>')
-    for d in (8.5, 6.5, 4.5):
-        out += layer(x, y, d, f'<path d="{mound}" fill="#fbfbf8"/>')
-    out += layer(x, y, 8.5, grain_marks(seed, 10, (-18, 16), (4, 10)))
-    return out
-
-
-def nigiri(name, item):
-    shape = item.get("shape", WEDGE)
-    body = ""
-    for i, (x, y) in enumerate(PAIR):
-        body += rice(x, y, f"{name}{i}")
-        side = item.get("side_shape", SIDE if shape == WEDGE else None)
-        if side:
-            # 鱼片前缘的侧面（两头往下垂）
-            body += layer(x, y, 0, f'<path d="{side}" fill="{item.get("side", item["shadow"])}"/>')
-        else:
-            # 方块（玉子）：每 0.5 叠一层，做出均匀的厚度
-            thick = item.get("thick", 2.6)
-            for d in [thick] + [k / 2 for k in range(int(thick * 2) - 1, 0, -1)]:
-                body += layer(x, y, d, f'<path d="{shape}" fill="{item["shadow"]}"/>{item.get("side_extra", "") if d == thick else ""}')
-        body += layer(
-            x, y, 0,
-            f'{item.get("under", "")}'
-            f'<clipPath id="c{i}"><path d="{shape}"/></clipPath>'
-            f'<path d="{shape}" fill="url(#t)"/>'
-            f'<g clip-path="url(#c{i})">{item.get("pattern", "")}'
-            f'{END_SHADE.format(c=item["shadow"]) if item.get("drape", True) else ""}</g>'
-            f'{item.get("over", "")}',
-        )
-    defs = (f'    <linearGradient id="t" x1="0" y1="0" x2="0.15" y2="1">'
-            f'<stop offset="0" stop-color="{item["light"]}"/><stop offset="0.45" stop-color="{item["base"]}"/>'
-            f'<stop offset="1" stop-color="{item["shadow"]}"/></linearGradient>\n') + item.get("defs", "")
-    return svg(defs, plate() + body)
-
-
-NORI_DEFS = """    <linearGradient id="noriSide" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#2a362f"/><stop offset="0.3" stop-color="#3b4a41"/><stop offset="1" stop-color="#1a221e"/>
-    </linearGradient>
-"""
-
-
-def gunkan(name, item):
-    oval = "M-25 0 C-25 -9 -13 -12.5 0 -12.5 C13 -12.5 25 -9 25 0 C25 9 13 12.5 0 12.5 C-13 12.5 -25 9 -25 0 Z"
-    inner = "M-21.5 -0.5 C-21.5 -7.5 -11 -10 0 -10 C11 -10 21.5 -7.5 21.5 -0.5 C21.5 6.5 11 9.5 0 9.5 C-11 9.5 -21.5 6.5 -21.5 -0.5 Z"
-    body = ""
-    for i, (x, y) in enumerate(PAIR):
-        for d in (13, 11, 9, 7, 5, 3, 1):
-            body += layer(x, y, d, f'<path d="{oval}" fill="{"#141b17" if d == 13 else "url(#noriSide)"}"/>')
-        body += layer(x, y, 8, '<path d="M-22 4 C-12 9 4 10 16 7" fill="none" stroke="#3d4d43" stroke-width="0.8" opacity="0.7"/>')
-        body += layer(
-            x, y, 0,
-            f'<path d="{oval}" fill="#2c3a31"/><path d="{inner}" fill="{item["base"]}"/>'
-            f'{item["filling"](f"{name}{i}")}',
-        )
-    return svg(item.get("defs", "") + NORI_DEFS, plate() + body)
-
-
-def maki(name, item):
-    top = "M-12.5 0 C-12.5 -5.5 -7 -8.5 0 -8.5 C7 -8.5 12.5 -5.5 12.5 0 C12.5 5.5 7 8.5 0 8.5 C-7 8.5 -12.5 5.5 -12.5 0 Z"
-    body = ""
-    for i, (x, y) in enumerate([(84, 40), (60, 50), (36, 60)]):
-        seed = f"{name}{i}"
-        r = bumpy_ellipse(10, 6.6, 20, seed, bump=(0.2, 0.6))
-        body += f'  <g transform="translate({x} {y}) scale(1.22)">'
-        body += '<path d="M-12.5 0 V13 C-12.5 18.5 -7 21.5 0 21.5 C7 21.5 12.5 18.5 12.5 13 V0 Z" fill="url(#noriSide)"/>'
-        body += '<path d="M-9 4 V17" stroke="#56685c" stroke-width="1.6" stroke-linecap="round" opacity="0.7"/>'
-        body += f'<path d="{top}" fill="#2c3a31"/><path d="{r}" fill="#fbfbf8"/>'
-        body += grain_marks(seed, 6, (-8, 6), (-5, 4))
-        body += item["core"]
-        body += "</g>\n"
-    return svg(item.get("defs", "") + NORI_DEFS, plate() + body)
-
-
-# ---------- 各种寿司的特征 ----------
-
-def ridge_light(color="#ffffff", opacity=0.35):
-    """顶面靠上的一道柔光，表现鱼片拱起来的弧度。"""
-    return (f'<path d="M-28 -5 C-14 -10.5 10 -10.5 30 -3.5" fill="none" stroke="{color}" stroke-width="4" '
-            f'opacity="{opacity}" filter="url(#soft)"/>')
-
-
-def salmon_pattern():
-    out = ""
-    for x, w in ((-26, 2.4), (-15, 1.6), (-5, 2.4), (6, 1.8), (16, 2.2), (26, 1.4)):
-        # 白色脂肪纹：顺着鱼片拱起来的弧线，粗细不一
-        out += (f'<path d="M{x + 5} -14 C{x} -7 {x + 4} 3 {x - 2} 13" fill="none" stroke="#fff3e8" stroke-width="{w}" opacity="0.95"/>'
-                f'<path d="M{x + 9} -14 C{x + 4} -7 {x + 8} 3 {x + 2} 13" fill="none" stroke="#ffc9a5" stroke-width="0.7" opacity="0.7"/>')
-    return out + ridge_light() + glints([(-20, -7, 4, 1.2), (-6, -9, 5, 1.3), (10, -8.5, 3.5, 1.1)])
-
-
-def maguro_pattern():
-    out = "".join(
-        f'<path d="M{x} -13 C{x + 3} -5 {x - 1} 4 {x + 2} 12" fill="none" stroke="#f0707c" stroke-width="0.8" opacity="0.25"/>'
-        for x in range(-24, 34, 11)
-    )
-    return out + ridge_light(opacity=0.25) + glints([(-22, -6, 4, 1.3), (-9, -9, 6, 1.4), (6, -9.5, 3, 1.1), (15, -8, 4.5, 1.2)])
-
-
-def ebi_pattern():
-    out = ""
-    for x in (-27, -16, -5, 6, 16):
-        out += f'<path d="M{x} -13 C{x + 3} -5 {x + 3} 4 {x} 12 H{x + 7} C{x + 10} 4 {x + 10} -5 {x + 7} -13 Z" fill="url(#shell)"/>'
-        out += f'<path d="M{x + 7} -13 C{x + 10} -5 {x + 10} 4 {x + 7} 12" fill="none" stroke="#fff" stroke-width="1" opacity="0.6"/>'
-    return out + ridge_light(opacity=0.3) + glints([(-18, -8, 3.5, 1.1), (-4, -9.5, 4, 1.2), (10, -8.5, 3, 1)])
-
-
-def saba_pattern(seed):
-    rnd = random.Random(seed)
-    # 背上是青色、肚子是银白：先铺背色，再画深色波浪纹
-    out = '<path d="M-40 -16 H40 V-1 C20 -3 -10 -2 -40 2 Z" fill="url(#back)"/>'
-    for x in range(-30, 34, 5):
-        x += rnd.uniform(-1, 1)
-        d = f"M{f(x)} -13"
-        yy = -13
-        while yy < -1:
-            step = rnd.uniform(3.5, 5)
-            d += f" q{f(rnd.uniform(1.5, 3) * rnd.choice([-1, 1]))} {f(step / 2)} {f(rnd.uniform(-1.2, 0.6))} {f(step)}"
-            yy += step
-        out += f'<path d="{d}" fill="none" stroke="#163246" stroke-width="{f(rnd.uniform(1.2, 2.2))}" stroke-linecap="round" opacity="0.85"/>'
-    out += '<path d="M-40 0.5 C-10 -2 15 -2.5 40 -1" fill="none" stroke="#d8e4ea" stroke-width="1.6" opacity="0.9"/>'
-    out += '<path d="M-30 5 C-10 7 10 6.5 30 3" fill="none" stroke="#d6c8f0" stroke-width="2.5" opacity="0.35" filter="url(#soft)"/>'
-    return out + glints([(-22, -6, 4, 1.2), (-8, -9, 5, 1.3), (8, -9, 3.5, 1.1), (-14, 4, 4, 1)])
-
-
-def aji_pattern():
-    out = '<path d="M-40 -16 H40 V-2 C20 -4 -10 -3 -40 1 Z" fill="url(#back)"/>'
-    out += '<path d="M-40 0 C-10 -3 15 -3.5 40 -2" fill="none" stroke="#e1c96a" stroke-width="1.1"/>'
-    out += '<path d="M-30 4 C-10 6.5 10 6 30 2.5" fill="none" stroke="#ffffff" stroke-width="2.5" opacity="0.6" filter="url(#soft)"/>'
-    return out + glints([(-24, -5, 3.5, 1.1), (-12, 3.5, 5, 1.2), (14, -7.5, 3.5, 1)])
-
-
-def aji_garnish():
-    rnd = random.Random("aji")
-    out = '<path d="M-8 -1 C-9.5 -6 -3 -8.5 2 -8 C7 -7.5 10 -4 8.5 -0.5 C7 2.5 1 4 -2 3.5 C-5.5 3 -7.5 1.5 -8 -1 Z" fill="#f2d98c"/>'
-    out += '<path d="M-6 -3 C-2 -6 4 -6 7 -3" fill="none" stroke="#fff3c4" stroke-width="1.4" stroke-linecap="round"/>'
-    for _ in range(10):
-        x, y = rnd.uniform(-6, 6), rnd.uniform(-6, 2)
-        out += f'<path d="M{f(x)} {f(y)} l{f(rnd.uniform(-1.4, 1.4))} {f(rnd.uniform(0.6, 1.4))}" stroke="#cfa94a" stroke-width="0.6" stroke-linecap="round"/>'
-    for cx, cy in [(-4, -4), (2.5, -5), (5.5, -0.5), (-1, 0.5), (-5.5, 1)]:
-        out += (f'<circle cx="{cx}" cy="{cy}" r="2.3" fill="#4f9a3a"/>'
-                f'<circle cx="{cx - 0.3}" cy="{cy - 0.3}" r="1.6" fill="#86c25e"/>'
-                f'<circle cx="{cx - 0.2}" cy="{cy - 0.2}" r="0.75" fill="#e6f4d6"/>')
-    return out
-
-
-def ikura_filling(seed):
-    rnd = random.Random(seed)
-    spots = [(-16, -2), (-10, -6.5), (-2, -8), (6, -7.5), (13, -5), (18, 0), (-12, 3), (-4, 0), (4, 0), (12, 2.5),
-             (-7, 6.5), (1, 7), (9, 6.5), (16, 5), (-17, 5)]
-    out = ""
-    for cx, cy in spots:
-        cx += rnd.uniform(-0.5, 0.5)
-        cy += rnd.uniform(-0.5, 0.5)
-        out += (f'<circle cx="{f(cx)}" cy="{f(cy)}" r="3.9" fill="url(#roe)"/>'
-                f'<circle cx="{f(cx + 0.8)}" cy="{f(cy + 1)}" r="1.2" fill="#e0581f" opacity="0.8"/>'
-                f'<circle cx="{f(cx - 1.3)}" cy="{f(cy - 1.4)}" r="0.95" fill="#fff"/>')
-    # 两片立起来的黄瓜，军舰上最常见的点缀
-    for tx, rot in ((-15, -12), (-8, 4)):
-        out += (f'<g transform="translate({tx} -7) rotate({rot})">'
-                '<path d="M-6 0 A6 6.5 0 0 1 6 0 Z" fill="#2f6e2a"/>'
-                '<path d="M-5 0 A5 5.4 0 0 1 5 0 Z" fill="#cfe8a6"/>'
-                '<path d="M-3.4 0 A3.4 3.6 0 0 1 3.4 0 Z" fill="#e4f2c8"/>'
-                '<g fill="#f6fbea"><ellipse cx="-1.6" cy="-1.4" rx="0.5" ry="0.8"/><ellipse cx="0" cy="-2" rx="0.5" ry="0.8"/><ellipse cx="1.6" cy="-1.4" rx="0.5" ry="0.8"/></g>'
-                "</g>")
-    return out
-
-
-ITEMS = {
-    "maguro": dict(kind=nigiri, light="#ec6672", base="#d23545", shadow="#9c1f30", pattern=maguro_pattern()),
-    "salmon": dict(kind=nigiri, light="#ffaa70", base="#f7823e", shadow="#d45f26", pattern=salmon_pattern()),
-    "ebi": dict(
-        kind=nigiri, light="#ffffff", base="#fbeee8", shadow="#e9c2b3",
-        shape=("M-34 6 C-34 -4 -22 -12.5 -2 -12.5 C14 -12.5 24 -7 29 -1 C30.5 1 30 3 28 3.6 "
-               "C20 5 12 8 -2 9.5 C-16 10.6 -26 12 -31 11.2 C-33.5 10.6 -34 8.5 -34 6 Z"),
-        side_shape=("M-34 6 C-34 8.5 -33.5 10.6 -31 11.2 C-26 12 -16 10.6 -2 9.5 C12 8 20 5 28 3.6 "
-                    "C29 6 28.5 8 26.5 8.8 C20 9.5 12 11 -2 12.2 C-16 13 -26 16.5 -31 16.8 C-34 17 -35 12 -34 6 Z"),
-        defs='    <linearGradient id="shell" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ff8a55"/><stop offset="1" stop-color="#e2402a"/></linearGradient>\n'
-             '    <linearGradient id="tail" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#f25a38"/><stop offset="1" stop-color="#9e2016"/></linearGradient>\n',
-        under='<path d="M25 -2 L42 -12 C39.5 -4 39.5 4 42 12 L25 3 Z" fill="url(#tail)"/>'
-              '<path d="M29 -3 L40 -9.5 M30 0 L40.5 -2.5 M30 1.5 L40.5 4 M29 3.5 L40 10" stroke="#7d1810" stroke-width="0.7" opacity="0.7"/>'
-              '<path d="M40.5 -10 C39.3 -4 39.3 4 40.5 10" fill="none" stroke="#5a140c" stroke-width="1.8" opacity="0.6"/>',
-        pattern=ebi_pattern(),
-    ),
-    "tamago": dict(
-        kind=nigiri, light="#ffe98f", base="#f7cf4a", shadow="#dba42c", thick=5, drape=False,
-        shape="M-29 -11 H29 Q32 -11 32 -8 V8 Q32 11 29 11 H-29 Q-32 11 -32 8 V-8 Q-32 -11 -29 -11 Z",
-        side_extra='<path d="M-31 8.5 H31 M-31 10.5 H31" stroke="#bf8a1e" stroke-width="0.6" opacity="0.8"/>'
-                   '<path d="M-5.5 -11 H5.5 V11 H-5.5 Z" fill="#141b17"/>',
-        pattern='<g fill="#d99a35" opacity="0.4"><ellipse cx="-21" cy="-3" rx="3.4" ry="1.3"/><ellipse cx="-14" cy="5" rx="2.4" ry="1"/>'
-                '<ellipse cx="15" cy="-5" rx="2.8" ry="1.2"/><ellipse cx="22" cy="4" rx="3.2" ry="1.3"/></g>'
-                '<path d="M-6 -12 H6 V12 H-6 Z" fill="url(#band)"/>'
-                '<path d="M-3 -10 V10 M2 -10 V10" stroke="#4b5d51" stroke-width="0.6" opacity="0.8"/>'
-                + glints([(-25, -7, 5, 1.3), (11, -7.5, 6, 1.3)]),
-        defs='    <linearGradient id="band" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#3a4a40"/><stop offset="1" stop-color="#18201b"/></linearGradient>\n',
-    ),
-    "saba": dict(
-        kind=nigiri, light="#ffffff", base="#e6ecf0", shadow="#c3ced6", side="#efd6cf",
-        defs='    <linearGradient id="back" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3b6878"/><stop offset="1" stop-color="#7fa6b0"/></linearGradient>\n',
-        pattern=saba_pattern("saba"),
-    ),
-    "aji": dict(
-        kind=nigiri, light="#ffffff", base="#dde4e7", shadow="#b4c2c8", side="#e8b4ac",
-        defs='    <linearGradient id="back" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5b7d84"/><stop offset="1" stop-color="#a9bfc2"/></linearGradient>\n',
-        pattern=aji_pattern(),
-        over=f'<g transform="translate(-2 -1) scale(1.3)">{aji_garnish()}</g>',
-    ),
-    "ikura": dict(
-        kind=gunkan, base="#a52e10",
-        defs='    <radialGradient id="roe" cx="0.36" cy="0.32" r="0.72"><stop offset="0" stop-color="#ffc99c"/>'
-             '<stop offset="0.4" stop-color="#f7702e"/><stop offset="0.85" stop-color="#cf3c10"/><stop offset="1" stop-color="#93270a"/></radialGradient>\n',
-        filling=ikura_filling,
-    ),
-    "kappamaki": dict(
-        kind=maki,
-        core='<rect x="-4.4" y="-3.2" width="8.8" height="5.6" rx="1" fill="#2f6e2a"/>'
-             '<rect x="-3.8" y="-2" width="7.6" height="4" rx="0.8" fill="#c5e397"/>'
-             '<g fill="#f2f8e4"><ellipse cx="-2" cy="0.2" rx="0.6" ry="0.4"/><ellipse cx="0.2" cy="0.5" rx="0.6" ry="0.4"/><ellipse cx="2.2" cy="0.1" rx="0.6" ry="0.4"/></g>',
-    ),
-}
-
-
-# ---------- 常用的点缀 ----------
-
-GINGER_SCALLION = f'<g transform="translate(-2 -1) scale(1.3)">{aji_garnish()}</g>'
-
-
-def back_band(fill, y=-1):
-    """鱼皮那一侧（顶面靠后）的一条颜色带。"""
-    return f'<path d="M-40 -16 H40 V{f(y - 2)} C20 {f(y - 4)} -10 {f(y - 3)} -40 {f(y + 1)} Z" fill="{fill}"/>'
-
-
-def scallions(spots, r=2.3):
-    """葱花：一个个空心的绿圈。"""
-    return "".join(
-        f'<circle cx="{f(cx)}" cy="{f(cy)}" r="{f(r)}" fill="#4f9a3a"/>'
-        f'<circle cx="{f(cx - 0.3)}" cy="{f(cy - 0.3)}" r="{f(r * 0.7)}" fill="#86c25e"/>'
-        f'<circle cx="{f(cx - 0.2)}" cy="{f(cy - 0.2)}" r="{f(r * 0.33)}" fill="#e6f4d6"/>'
-        for cx, cy in spots
-    )
-
-
-def marbling(xs, color, widths, opacity):
-    """顺着鱼片弧度的脂肪纹（中腹、大腹）。"""
-    return "".join(
-        f'<path d="M{f(x + 5)} -14 C{f(x)} -7 {f(x + 4)} 3 {f(x - 2)} 13" fill="none" stroke="{color}" '
-        f'stroke-width="{widths[i % len(widths)]}" opacity="{opacity}"/>'
-        for i, x in enumerate(xs)
-    )
-
-
-def momiji_chives():
-    """红叶萝卜泥 + 细葱，比目鱼常见的配料。"""
-    rnd = random.Random("momiji")
-    out = '<path d="M-6 0 C-7 -4 -3 -6.5 0 -6.5 C4 -6.5 7 -4 6 0 C5 2.5 -4 2.8 -6 0 Z" fill="#ef8a5a"/>'
-    out += '<path d="M-4 -3 C-1 -5 2 -5 4 -3" fill="none" stroke="#ffc39c" stroke-width="1.2" stroke-linecap="round"/>'
-    for _ in range(8):
-        out += f'<circle cx="{f(rnd.uniform(-4.5, 4.5))}" cy="{f(rnd.uniform(-5, 0.5))}" r="0.5" fill="#d0602f"/>'
-    return out + scallions([(6.5, -3.5), (8.5, 0.3), (4, 1.6)], r=1.6)
-
-
-def onion_slivers():
-    """炙烤长鳍金枪鱼上的洋葱丝 + 葱花。"""
-    out = ""
-    for d in ("M-9 -2 C-6 -5 -2 -5 1 -3", "M-4 1 C-1 -2 3 -2 6 0", "M0 -5 C3 -7 7 -6 9 -4"):
-        out += f'<path d="{d}" fill="none" stroke="#e3dccb" stroke-width="2.6" stroke-linecap="round"/>'
-        out += f'<path d="{d}" fill="none" stroke="#fffdf6" stroke-width="1.6" stroke-linecap="round"/>'
-    return out + scallions([(-3, -5.5), (4, -1.5)], r=1.8)
-
-
-def dots(seed, n, xr, yr, color, r=(0.6, 1.1), opacity=1):
-    rnd = random.Random(seed)
-    return "".join(
-        f'<circle cx="{f(rnd.uniform(*xr))}" cy="{f(rnd.uniform(*yr))}" r="{f(rnd.uniform(*r))}" fill="{color}" opacity="{opacity}"/>'
-        for _ in range(n)
-    )
-
-
-def grad(gid, stops, x2=0, y2=1):
-    s = "".join(f'<stop offset="{o}" stop-color="{c}"/>' for o, c in stops)
-    return f'    <linearGradient id="{gid}" x1="0" y1="0" x2="{x2}" y2="{y2}">{s}</linearGradient>\n'
-
-
-def radial(gid, stops, cx=0.4, cy=0.35, r=0.7):
-    s = "".join(f'<stop offset="{o}" stop-color="{c}"/>' for o, c in stops)
-    return f'    <radialGradient id="{gid}" cx="{cx}" cy="{cy}" r="{r}">{s}</radialGradient>\n'
-
-
-STD_GLINTS = glints([(-20, -7, 4, 1.2), (-6, -9.5, 5, 1.3), (10, -8.5, 3.5, 1.1)])
-EBI_SHAPE = ITEMS["ebi"]["shape"]
-EBI_SIDE = ITEMS["ebi"]["side_shape"]
-HOTATE = "M-32 3 C-32 -7 -18 -13 0 -13 C18 -13 32 -7 32 3 C32 9 18 12 0 12 C-18 12 -32 9 -32 3 Z"
-HOTATE_SIDE = ("M-32 3 C-32 9 -18 12 0 12 C18 12 32 9 32 3 C32.5 8 31 13 26 15 "
-               "C18 17.5 -18 17.5 -26 15 C-31 13 -32.5 8 -32 3 Z")
-
-
-ENGAWA = ("M-34 4 C-34 -2 -24 -8 -2 -8.5 C16 -8.8 30 -4 36 3 "
-          "C30 3 16 5.5 -2 6.5 C-16 7.2 -26 8.5 -31 8 C-33.5 7.6 -34 6 -34 4 Z")
-ENGAWA_SIDE = ("M-34 4 C-34 6 -33.5 7.6 -31 8 C-26 8.5 -16 7.2 -2 6.5 C16 5.5 30 3 36 3 "
-               "C36.5 6 35 8.5 32 9 C24 8.5 14 9.5 -2 10 C-16 10.6 -26 13.5 -31 13.8 C-34 14 -35 9 -34 4 Z")
-IKA = "M-30 -9 Q-30 -12 -27 -12 H28 Q31 -12 31 -9 V8 Q31 11 28 11 H-27 Q-30 11 -30 8 Z"
-IKA_SIDE = "M-30 8 Q-30 11 -27 11 H28 Q31 11 31 8 V11 Q31 14 28 14 H-27 Q-30 14 -30 11 Z"
-
-
-def crosshatch(color, step=3.5, width=0.6, opacity=0.9):
-    out = ""
-    for k in range(-14, 14):
-        x = k * step
-        out += f'<path d="M{f(x)} -16 l16 32 M{f(x)} 16 l16 -32" stroke="{color}" stroke-width="{width}" opacity="{opacity}"/>'
-    return out
-
-
-def chiai(color, d, opacity=0.9):
-    """血合：靠背骨那一侧的一块深红色。"""
-    return f'<path d="{d}" fill="{color}" opacity="{opacity}" filter="url(#soft)"/>'
-
-
-def suckers():
-    out = ""
-    for x in range(-24, 28, 7):
-        out += f'<circle cx="{x}" cy="-6.5" r="2.3" fill="#f2c4d0"/><circle cx="{x}" cy="-6.5" r="1.1" fill="#d996aa"/>'
-    return out
-
-
-# ---------- 军舰的料 ----------
-
-def uni_filling(seed):
-    rnd = random.Random(seed)
-    lobes = [(-12, -5, -20), (0, -6.5, -8), (12, -4, 12), (-13, 3, -14), (-1, 2, -4), (11, 3.5, 10), (-5, 7.5, 2), (7, 8, 6)]
-    out = ""
-    for cx, cy, rot in lobes:
-        out += (f'<g transform="translate({cx} {cy}) rotate({rot})"><ellipse rx="8" ry="3.8" fill="url(#uni)"/>'
-                f'<path d="M-5 -1.6 C-2 -2.6 2 -2.6 5 -1.6" fill="none" stroke="#ffe3a0" stroke-width="1" stroke-linecap="round"/></g>')
-    out += dots(seed, 40, (-19, 19), (-8, 9), "#ffd98a", r=(0.35, 0.6), opacity=0.8)
-    return out
-
-
-def tobikko_filling(seed):
-    rnd = random.Random(seed)
-    out = ""
-    for _ in range(90):
-        a, rr = rnd.uniform(0, 2 * math.pi), math.sqrt(rnd.random())
-        x, y = 20 * rr * math.cos(a), 8.3 * rr * math.sin(a)
-        out += f'<circle cx="{f(x)}" cy="{f(y)}" r="1.5" fill="#ff8a2a"/><circle cx="{f(x - 0.5)}" cy="{f(y - 0.5)}" r="0.45" fill="#fff1d2"/>'
-    return out
-
-
-def kanimiso_filling(seed):
-    out = '<ellipse cx="0" cy="0" rx="20" ry="8.4" fill="#86814b"/>'
-    out += ('<path d="M-14 -3 C-8 -7 2 -6 8 -3 C12 -1 16 -3 18 0" fill="none" stroke="#b0a764" stroke-width="3" opacity="0.8" filter="url(#soft)"/>'
-            '<path d="M-16 4 C-8 1 0 5 8 3 C12 2 15 4 17 3" fill="none" stroke="#5d5930" stroke-width="2.4" opacity="0.7" filter="url(#soft)"/>')
-    out += dots(seed, 10, (-16, 16), (-6, 6), "#c96a3a", r=(0.5, 0.9), opacity=0.7)
-    return out + glints([(-10, -4, 4, 1.1), (5, -5, 3, 1)])
-
-
-def shirasu_filling(seed):
-    rnd = random.Random(seed)
-    out = ""
-    for _ in range(30):
-        a, rr = rnd.uniform(0, 2 * math.pi), math.sqrt(rnd.random())
-        x, y = 18 * rr * math.cos(a), 7.5 * rr * math.sin(a)
-        rot = rnd.randint(0, 180)
-        out += (f'<g transform="translate({f(x)} {f(y)}) rotate({rot})">'
-                '<path d="M-2.4 0 Q0 -1.3 2.4 0" fill="none" stroke="#cfc9b8" stroke-width="2"/>'
-                '<path d="M-2.4 0 Q0 -1.3 2.4 0" fill="none" stroke="#fdfbf3" stroke-width="1.2"/>'
-                '<circle cx="-2.2" cy="-0.1" r="0.45" fill="#2b2b2b"/></g>')
-    return out + scallions([(-6, -4), (5, 2)], r=1.7)
-
-
-def negitoro_filling(seed):
-    out = '<ellipse cx="0" cy="0" rx="20" ry="8.4" fill="#ea8592"/>'
-    out += dots(seed, 30, (-17, 17), (-7, 7), "#f6a7b1", r=(1, 2), opacity=0.8)
-    out += dots(seed + "b", 18, (-17, 17), (-7, 7), "#d9677a", r=(0.8, 1.6), opacity=0.7)
-    return out + scallions([(-10, -3), (-3, -5), (4, -2), (11, -4), (-6, 3), (2, 4), (9, 3)], r=2.2)
-
-
-# ---------- 豆皮寿司 ----------
-
-POUCH = ("M-27 -6 C-27 -11 -23 -13 -17 -13 H17 C23 -13 27 -11 27 -6 V5 "
-         "C27 10 23 12 17 12 H-17 C-23 12 -27 10 -27 5 Z")
-
-
-def inari(name, item):
-    body = ""
-    for i, (x, y) in enumerate(PAIR):
-        for k in range(12, 0, -1):
-            body += layer(x, y, k / 2, f'<path d="{POUCH}" fill="{"#9a5a1e" if k == 12 else "#b8742c"}"/>')
-        body += layer(
-            x, y, 0,
-            f'<clipPath id="c{i}"><path d="{POUCH}"/></clipPath><path d="{POUCH}" fill="url(#t)"/>'
-            f'<g clip-path="url(#c{i})">{dots(f"{name}{i}", 26, (-25, 25), (-11, 10), "#a8651f", r=(0.5, 1.1), opacity=0.55)}'
-            f'<path d="M-22 -8 C-10 -11 10 -11 22 -8" fill="none" stroke="#fff3d6" stroke-width="3" opacity="0.45" filter="url(#soft)"/>'
-            f'<path d="M-20 -2 C-14 -3 -10 -1 -6 -2 M4 3 C10 2 14 4 20 3" fill="none" stroke="#b9732b" stroke-width="1" opacity="0.7"/></g>'
-            + glints([(-16, -8, 4, 1.1), (8, -9, 3, 1)]),
-        )
-    return svg(grad("t", [(0, "#efbd73"), (0.5, "#dc9b4c"), (1, "#bd7a32")]), plate() + body)
-
-
-# ---------- 副菜：碗、杯子、小碟 ----------
-
-def bowl(defs, outer, rim, soup, contents, band=""):
-    body = f"""  <ellipse cx="60" cy="87" rx="42" ry="5" fill="#1c2b36" opacity="0.12"/>
-  <ellipse cx="60" cy="80" rx="18" ry="4.5" fill="#1c2b36" opacity="0.25"/>
-  <path d="M14 40 C16 64 36 81 60 81 C84 81 104 64 106 40 Z" fill="{outer}"/>
-  {band}
-  <path d="M22 52 C28 66 40 74 52 76" fill="none" stroke="#fff" stroke-width="2.4" opacity="0.25" stroke-linecap="round"/>
-  <ellipse cx="60" cy="40" rx="46" ry="17.5" fill="{rim}"/>
-  <ellipse cx="60" cy="41.2" rx="41.5" ry="15" fill="{soup}"/>
-  {contents}
-"""
-    return svg(defs, body)
-
-
-def misoshiru(name, item):
-    c ='<path d="M30 40 C40 34 56 36 64 40 C72 44 84 42 90 38" fill="none" stroke="#e2b27a" stroke-width="6" opacity="0.5" filter="url(#soft)"/>'
-    for x, y, r in ((44, 38, -8), (62, 45, 12), (76, 37, 4)):  # 豆腐
-        c += (f'<g transform="translate({x} {y}) rotate({r})"><rect x="-4.5" y="-2.5" width="9" height="6.5" rx="1" fill="#e9e3d6"/>'
-              '<rect x="-4.5" y="-3.5" width="9" height="5" rx="1" fill="#fffdf6"/></g>')
-    for x, y in ((52, 47), (70, 41), (38, 44)):  # 海带
-        c += (f'<path d="M{x - 5} {y} C{x - 3} {y - 4} {x + 3} {y - 4} {x + 6} {y - 1} C{x + 2} {y + 2} {x - 2} {y + 3} {x - 5} {y} Z" fill="#2f5a2a"/>'
-              f'<path d="M{x - 3} {y - 1} C{x} {y - 3} {x + 3} {y - 2} {x + 4} {y - 1}" fill="none" stroke="#4f7d45" stroke-width="0.8"/>')
-    c += scallions([(56, 36), (66, 34), (48, 42), (82, 43), (60, 40)], r=1.9)
-    c += glints([(30, 36, 5, 1.2), (84, 36, 4, 1)])
-    defs = (grad("lacq", [(0, "#3a3436"), (1, "#141012")], x2=1, y2=0.4)
-            + radial("miso", [(0, "#d9a56a"), (1, "#a96f3a")], cx=0.45, cy=0.4, r=0.65))
-    return bowl(defs, "url(#lacq)", "#8f2a1e", "url(#miso)", c)
-
-
-def udon(name, item):
-    c = ""
-    for d in ("M24 40 C36 32 50 50 64 40 C76 32 86 46 98 40", "M28 46 C40 38 54 54 70 44 C80 38 88 48 94 45",
-              "M30 35 C42 30 54 42 66 35 C76 30 84 38 92 34", "M36 50 C48 44 60 54 74 49"):
-        c += f'<path d="{d}" fill="none" stroke="#e0cfa6" stroke-width="5.2" stroke-linecap="round"/>'
-        c += f'<path d="{d}" fill="none" stroke="#fdf8ea" stroke-width="3.8" stroke-linecap="round"/>'
-    c += ('<g transform="translate(78 38) rotate(-10)"><path d="M-8 2 C-8 -5 8 -5 8 2 Z" fill="#fffaf2"/>'
-          '<path d="M-8 2 C-8 -5 8 -5 8 2" fill="none" stroke="#f07d9a" stroke-width="1.6"/>'
-          '<path d="M-4 1 C-4 -2 4 -2 4 1" fill="none" stroke="#f7b4c5" stroke-width="0.9"/></g>')
-    c += scallions([(46, 38), (54, 34), (60, 44), (40, 45), (68, 36)], r=1.9)
-    c += dots("udon7", 8, (40, 70), (34, 46), "#c8402a", r=(0.4, 0.7))
-    band = '<path d="M17 50 C26 62 44 70 60 70 C76 70 94 62 103 50" fill="none" stroke="#2e5f9e" stroke-width="3"/>'
-    defs = grad("ub", [(0, "#ffffff"), (1, "#dfe5ec")], x2=1, y2=0.3)
-    return bowl(defs, "url(#ub)", "#f4f6f8", "#e7c27c", c, band=band)
-
-
-def chawanmushi(name, item):
-    body = """  <ellipse cx="60" cy="86" rx="42" ry="5" fill="#1c2b36" opacity="0.12"/>
-  <ellipse cx="60" cy="74" rx="44" ry="12" fill="#cfd6dc"/>
-  <ellipse cx="60" cy="72" rx="44" ry="12" fill="#f6f8fa"/>
-  <path d="M30 36 C31 60 44 74 60 74 C76 74 89 60 90 36 Z" fill="url(#cup)"/>
-  <path d="M33 50 C40 60 50 64 60 64 C70 64 80 60 87 50" fill="none" stroke="#2e4f8a" stroke-width="2"/>
-  <path d="M38 58 l4 -3 l4 3 l4 -3 l4 3 l4 -3 l4 3 l4 -3 l4 3 l4 -3 l4 3" fill="none" stroke="#2e4f8a" stroke-width="1"/>
-  <ellipse cx="60" cy="36" rx="30" ry="11" fill="#fbfcfd"/>
-  <ellipse cx="60" cy="37" rx="26.5" ry="9" fill="url(#custard)"/>
-  <path d="M42 34 C50 30 62 30 72 32" fill="none" stroke="#fff" stroke-width="2.4" opacity="0.6" stroke-linecap="round"/>
-  <g transform="translate(66 38)"><path d="M-6 1 C-6 -4 2 -6 6 -2 C3 -1 1 2 -2 3 C-4 3.5 -6 3 -6 1 Z" fill="#f58a6a"/>
-    <path d="M-4 0 C-2 -3 2 -3.5 4 -2" fill="none" stroke="#fff" stroke-width="1" opacity="0.8"/></g>
-  <g transform="translate(52 36)"><ellipse cx="-3" cy="0" rx="3.2" ry="2" fill="#5ea34a"/><ellipse cx="3" cy="0" rx="3.2" ry="2" fill="#5ea34a"/>
-    <ellipse cx="0" cy="-2.6" rx="2" ry="3" fill="#6fb655"/><path d="M0 0 L0 4" stroke="#3f7a2c" stroke-width="0.9"/></g>
-"""
-    defs = grad("cup", [(0, "#ffffff"), (1, "#dde4eb")], x2=1, y2=0.3) + grad("custard", [(0, "#fdf0c2"), (1, "#f0d27c")])
-    return svg(defs, body)
-
-
-def wasabi(name, item):
-    c = ('  <ellipse cx="60" cy="62" rx="16" ry="5" fill="#1c2b36" opacity="0.12"/>\n'
-         '  <path d="M44 60 C42 52 50 46 56 44 C60 40 62 34 66 33 C66 38 64 42 68 45 C76 48 78 56 74 60 C68 65 50 65 44 60 Z" fill="url(#w)"/>\n'
-         '  <path d="M50 52 C54 48 60 47 64 48 M48 58 C56 56 66 57 72 55" fill="none" stroke="#b9dc84" stroke-width="1.4" opacity="0.8" stroke-linecap="round"/>\n'
-         f'  {dots("wasabi", 26, (46, 74), (46, 62), "#4f8a2a", r=(0.4, 0.8), opacity=0.6)}\n'
-         f'  {glints([(52, 49, 4, 1.1), (62, 38, 2.5, 1)])}\n')
-    c = f'  <g transform="translate(60 56) scale(1.5) translate(-60 -56)">\n{c}  </g>\n'
-    return svg(grad("w", [(0, "#a8d266"), (1, "#5f9a35")], x2=0.3, y2=1), plate() + c)
-
-
-def gari(name, item):
-    rnd = random.Random(name)
-    c = '  <ellipse cx="60" cy="64" rx="20" ry="6" fill="#1c2b36" opacity="0.10"/>\n'
-    for _ in range(9):
-        x, y = 60 + rnd.uniform(-12, 12), 54 + rnd.uniform(-6, 6)
-        rot, rx = rnd.randint(-40, 40), rnd.uniform(8, 11)
-        c += (f'  <g transform="translate({f(x)} {f(y)}) rotate({rot})">'
-              f'<ellipse rx="{f(rx)}" ry="{f(rx * 0.6)}" fill="#f9d8d2" opacity="0.92"/>'
-              f'<ellipse rx="{f(rx)}" ry="{f(rx * 0.6)}" fill="none" stroke="#efb2aa" stroke-width="0.9"/>'
-              f'<path d="M{f(-rx * 0.6)} 0 C0 -1.5 {f(rx * 0.3)} 1 {f(rx * 0.6)} 0" fill="none" stroke="#f3c2bb" stroke-width="0.6"/></g>\n')
-    c += f'  {glints([(54, 48, 4, 1.1), (66, 52, 3, 1)])}\n'
-    c = f'  <g transform="translate(60 56) scale(1.4) translate(-60 -56)">\n{c}  </g>\n'
-    return svg("", plate() + c)
-
-
-ITEMS.update({
-    # 赤身
-    "chutoro": dict(kind=nigiri, light="#f9a6ac", base="#ea6f7d", shadow="#c24658",
-                    pattern=marbling(range(-28, 36, 7), "#ffe3e5", (1.4, 0.8), 0.8) + ridge_light() + STD_GLINTS),
-    "otoro": dict(kind=nigiri, light="#ffdcdb", base="#f4adb2", shadow="#d97b86",
-                  pattern=marbling([x / 2 for x in range(-60, 76, 9)], "#fff5f3", (2.2, 1.2, 1.6), 0.9) + ridge_light() + STD_GLINTS),
-    "katsuo": dict(kind=nigiri, light="#d65463", base="#b52a3d", shadow="#7e1828",
-                   defs=grad("sear", [(0, "#5f666f"), (1, "#a3a8ad")]),
-                   pattern=back_band("url(#sear)", -3)
-                   + "".join(f'<path d="M{x} -12 l3 6" stroke="#3a2a22" stroke-width="1.6" opacity="0.6" stroke-linecap="round"/>' for x in range(-26, 30, 6))
-                   + STD_GLINTS,
-                   over=GINGER_SCALLION),
-    "bincho": dict(kind=nigiri, light="#fbe1dc", base="#f0c3bb", shadow="#d49a91",
-                   pattern=chiai("#c4844f", "M-34 -16 H38 V-4 C20 -7 -10 -6 -34 -2 Z", 0.55)
-                   + dots("bincho", 14, (-28, 28), (-12, -4), "#7a4a2a", r=(0.5, 1), opacity=0.6) + STD_GLINTS,
-                   over=onion_slivers()),
-    # 白身
-    "tai": dict(kind=nigiri, light="#ffffff", base="#f6ecea", shadow="#e0c6c2",
-                defs=grad("skin", [(0, "#d93b52"), (1, "#f4a3a6")]),
-                pattern=back_band("url(#skin)", -5)
-                + '<path d="M-40 -5 C-10 -9 15 -9.5 40 -6" fill="none" stroke="#ffffff" stroke-width="1.4" opacity="0.9"/>'
-                + marbling(range(-26, 34, 9), "#ffffff", (0.8,), 0.6) + STD_GLINTS),
-    # 比目鱼：通透的白色月牙，靠正中间放大的红叶萝卜泥 + 葱来认
-    "hirame": dict(kind=nigiri, light="#ffffff", base="#eeedea", shadow="#cdd0d3",
-                   pattern='<ellipse cx="2" cy="1" rx="22" ry="6" fill="#dfe3e8" opacity="0.6" filter="url(#soft)"/>'
-                   + "".join(f'<path d="M-32 8 Q{x - 10} -2 {x} -14" fill="none" stroke="#ffffff" stroke-width="0.9" opacity="0.75"/>'
-                             for x in range(-24, 40, 7))
-                   + ridge_light(opacity=0.5) + STD_GLINTS,
-                   over=f'<g transform="translate(0 -3) scale(1.6)">{momiji_chives()}</g>'),
-    # 鳍边肉：窄长的一条奶黄色，表面一道道粗横纹（下面露出更多米饭）
-    "engawa": dict(kind=nigiri, light="#fffcf0", base="#f4e9cc", shadow="#d6bf8d", side="#cdb582",
-                   shape=ENGAWA, side_shape=ENGAWA_SIDE,
-                   pattern="".join(
-                       f'<path d="M{f(x + 2)} -12 C{f(x)} -5 {f(x + 1.5)} 2 {f(x - 0.5)} 9" fill="none" stroke="#d6bd88" stroke-width="1.8"/>'
-                       f'<path d="M{f(x + 3.6)} -12 C{f(x + 1.6)} -5 {f(x + 3.1)} 2 {f(x + 1.1)} 9" fill="none" stroke="#ffffff" stroke-width="1" opacity="0.9"/>'
-                       for x in [k * 4 for k in range(-9, 10)])
-                   + ridge_light(opacity=0.5) + STD_GLINTS),
-    "hamachi": dict(kind=nigiri, light="#fff3ec", base="#f6d5c6", shadow="#dcab98",
-                    pattern=chiai("#c4525c", "M-36 -16 H8 C-2 -11 -18 -8 -36 -5 Z") + ridge_light() + STD_GLINTS),
-    "buri": dict(kind=nigiri, light="#fff0e6", base="#f0cab5", shadow="#d39c85",
-                 pattern=chiai("#a3343d", "M-36 -16 H20 C8 -9 -14 -5 -36 -1 Z")
-                 + marbling(range(-10, 34, 9), "#fff7f0", (1.2,), 0.8) + ridge_light() + STD_GLINTS),
-    "kanpachi": dict(kind=nigiri, light="#ffffff", base="#f8e8e0", shadow="#ddbcae",
-                     pattern=chiai("#e79a9a", "M-36 -16 H40 V-10 C20 -11 -10 -10 -36 -7 Z", 0.8) + ridge_light() + STD_GLINTS),
-    # 光物
-    "iwashi": dict(kind=nigiri, light="#ffffff", base="#e2e8ec", shadow="#b9c5cd", side="#e4b0a6",
-                   defs=grad("back", [(0, "#3e5f7c"), (1, "#8aa5b8")]),
-                   pattern=back_band("url(#back)", -1)
-                   + "".join(f'<circle cx="{x}" cy="{f(1.2 - abs(x) * 0.04)}" r="1.1" fill="#1f2f3d"/>' for x in range(-26, 26, 7))
-                   + STD_GLINTS,
-                   over=GINGER_SCALLION),
-    "kohada": dict(kind=nigiri, light="#ffffff", base="#e8ebe4", shadow="#b9c1ba", side="#efd2c8",
-                   defs=grad("back", [(0, "#7f918a"), (1, "#c3ccc4")]),
-                   pattern=back_band("url(#back)", 0)
-                   + "".join(f'<circle cx="{x + (2.5 if row % 2 else 0)}" cy="{y}" r="0.85" fill="#3a4a48"/>'
-                             for row, y in enumerate((-10, -6.5, -3)) for x in range(-30, 34, 5))
-                   + '<path d="M-6 -12 l-4 22 M8 -12 l-4 22" stroke="#ffffff" stroke-width="1" opacity="0.8"/>'
-                   + '<path d="M-40 2 C-10 -1 15 -1.5 40 0" fill="none" stroke="#d6c66e" stroke-width="1"/>' + STD_GLINTS),
-    "sanma": dict(kind=nigiri, light="#ffffff", base="#dfe5ea", shadow="#aeb9c2", side="#e3b1a8",
-                  defs=grad("back", [(0, "#2e3c5a"), (1, "#6c7f9e")]),
-                  pattern=back_band("url(#back)", 1)
-                  + '<path d="M-40 2.5 C-10 -0.5 15 -1 40 0.5" fill="none" stroke="#ffffff" stroke-width="1.6"/>' + STD_GLINTS,
-                  over=scallions([(-6, -4), (0, -6), (6, -4.5), (-2, -1), (4, 0)], r=2.3)),
-    # 贝类
-    "hotate": dict(kind=nigiri, light="#fffdf6", base="#f6ecdc", shadow="#d9c6a8", shape=HOTATE, side_shape=HOTATE_SIDE, drape=False,
-                   # 纹路很淡：扇贝看起来是一整块光滑圆润的贝肉，免得和有粗横纹的鳍边肉混
-                   pattern="".join(f'<path d="M{x} -14 C{x + 1} -4 {x - 1} 5 {x} 13" fill="none" stroke="#eadabb" stroke-width="0.7" opacity="0.4"/>' for x in range(-28, 30, 6))
-                   + '<path d="M0 -13 C1 -3 -1 6 0 12" fill="none" stroke="#e2cfac" stroke-width="1.3"/>'
-                   + ridge_light(opacity=0.5) + STD_GLINTS),
-    "akagai": dict(kind=nigiri, light="#ff9d74", base="#ee5d3a", shadow="#c03a22",
-                   pattern='<path d="M-34 7 C-26 4 -22 9 -14 6 C-6 3 -2 8 6 5 C14 2 18 6 26 3 C30 1.5 34 3 38 2" fill="none" stroke="#ffbf9e" stroke-width="2.2"/>'
-                   + '<path d="M-22 -2 C-8 -5 8 -5 24 -2" fill="none" stroke="#a82a17" stroke-width="1.3"/>'
-                   + ridge_light() + STD_GLINTS),
-    "tsubugai": dict(kind=nigiri, light="#ffffff", base="#f4f1ea", shadow="#cfc6b5", side="#a99a85",
-                     pattern=f'<path d="{WEDGE}" fill="none" stroke="#8f7f6a" stroke-width="6" opacity="0.55" filter="url(#soft)"/>'
-                     + "".join(f'<path d="M{x} -10 l1 4" stroke="#dcd2c1" stroke-width="0.8"/>' for x in range(-24, 28, 4))
-                     + STD_GLINTS),
-    "hokkigai": dict(kind=nigiri, light="#ffffff", base="#f3edef", shadow="#d6c6ca",
-                     # 煮过的北极贝，尖端是红的：从右往左褪色
-                     defs='    <linearGradient id="tip" x1="1" y1="0" x2="0" y2="0"><stop offset="0" stop-color="#e8485e"/>'
-                          '<stop offset="0.55" stop-color="#f39aa8"/><stop offset="1" stop-color="#f3edef"/></linearGradient>\n',
-                     pattern='<path d="M2 -16 H40 V16 H2 Z" fill="url(#tip)" filter="url(#soft)"/>'
-                     + '<path d="M-24 -1 C-10 -4 6 -4 22 -1" fill="none" stroke="#c8b0b6" stroke-width="1"/>' + STD_GLINTS),
-    "awabi": dict(kind=nigiri, light="#efe6c6", base="#d6c897", shadow="#a99a66", side="#8f8456",
-                  pattern=crosshatch("#b5a674", step=4, width=0.7)
-                  + f'<path d="{WEDGE}" fill="none" stroke="#6e6a40" stroke-width="4" opacity="0.5" filter="url(#soft)"/>' + STD_GLINTS),
-    # 虾蟹乌贼章鱼
-    "amaebi": dict(kind=nigiri, light="#ffd8cc", base="#ffaa96", shadow="#e57d6b", side="#f19d8b",
-                   shape=EBI_SHAPE, side_shape=EBI_SIDE,
-                   under='<path d="M24 -4 L36 -11 C34 -7 34 -3 35 -1 L25 0 Z" fill="#ff6b4a"/>'
-                         '<path d="M24 1 L35 1 C34 4 34 8 36 11 L25 4 Z" fill="#f2583a"/>',
-                   pattern='<path d="M-34 1 C-10 -2 14 -2 30 0.5" fill="none" stroke="#ffd2c6" stroke-width="1.4"/>'
-                   + "".join(f'<path d="M{x} -12 C{x + 2} -6 {x + 2} 6 {x} 12" fill="none" stroke="#f59a86" stroke-width="0.8" opacity="0.7"/>' for x in range(-24, 26, 8))
-                   + ridge_light(opacity=0.5) + STD_GLINTS),
-    "botanebi": dict(kind=nigiri, light="#ffc6b8", base="#f78a7a", shadow="#d65a4e", side="#e98374",
-                     shape=EBI_SHAPE, side_shape=EBI_SIDE,
-                     defs=ITEMS["ebi"]["defs"],
-                     under=ITEMS["ebi"]["under"],
-                     pattern=dots("botan", 40, (-30, 26), (-12, 10), "#d0302a", r=(0.4, 0.9), opacity=0.7)
-                     + "".join(f'<path d="M{x} -12 C{x + 2} -6 {x + 2} 6 {x} 12" fill="none" stroke="#ffb3a3" stroke-width="1" opacity="0.8"/>' for x in range(-24, 26, 9))
-                     + ridge_light(opacity=0.45) + STD_GLINTS),
-    "kani": dict(kind=nigiri, light="#ffffff", base="#f8f3ee", shadow="#dacfc4",
-                 defs=grad("crab", [(0, "#e8432c"), (1, "#ff9a7a")]),
-                 pattern="".join(f'<path d="M-40 {y} C-10 {y - 2} 15 {y - 2.5} 40 {y - 1}" fill="none" stroke="#e8ddd2" stroke-width="0.7"/>' for y in range(0, 12, 2))
-                 + back_band("url(#crab)", -2) + STD_GLINTS),
-    # 鱿鱼：切成方方正正的一片，雪白、很亮，一个方向的细斜刀纹
-    "ika": dict(kind=nigiri, light="#ffffff", base="#f5f8fb", shadow="#bccad8", side="#b9c7d5",
-                shape=IKA, side_shape=IKA_SIDE, drape=False,
-                pattern="".join(f'<path d="M{x} -14 l9 28" stroke="#c7d2de" stroke-width="0.9"/>' for x in range(-40, 36, 5))
-                # 白色放在白盘上会糊成一片：边缘压一圈冷灰，轮廓才出得来
-                + f'<path d="{IKA}" fill="none" stroke="#a9b8c8" stroke-width="3.5" opacity="0.7" filter="url(#soft)"/>'
-                + '<path d="M-28 -8 H26" stroke="#ffffff" stroke-width="3.5" opacity="0.8" filter="url(#soft)" stroke-linecap="round"/>'
-                + glints([(-24, -9, 7, 1.4), (-8, -9.5, 5, 1.3), (10, -9, 8, 1.4), (-18, 5, 4, 1)])),
-    "tako": dict(kind=nigiri, light="#ffffff", base="#f6edf0", shadow="#dcc4cb", side="#9b3550",
-                 defs=grad("skin", [(0, "#7e2240"), (1, "#c45a7a")]),
-                 pattern=back_band("url(#skin)", -3) + suckers() + STD_GLINTS),
-    # 军舰
-    "uni": dict(kind=gunkan, base="#c9781e",
-                defs=radial("uni", [(0, "#ffd877"), (0.6, "#f0a232"), (1, "#c97418")]), filling=uni_filling),
-    "tobikko": dict(kind=gunkan, base="#e0661a", filling=tobikko_filling),
-    "kanimiso": dict(kind=gunkan, base="#6e6a3c", filling=kanimiso_filling),
-    "shirasu": dict(kind=gunkan, base="#ece8dc", filling=shirasu_filling),
-    "negitoro": dict(kind=gunkan, base="#e07a88", filling=negitoro_filling),
-    # 卷物
-    "tekkamaki": dict(kind=maki, core='<rect x="-4.6" y="-3.4" width="9.2" height="6.4" rx="1.4" fill="#c8323a"/>'
-                                       '<rect x="-4" y="-3" width="8" height="2" rx="1" fill="#e5606c"/>'),
-    "kanpyomaki": dict(kind=maki, core='<rect x="-4.6" y="-3.4" width="9.2" height="3" rx="1.2" fill="#8a5428"/>'
-                                        '<rect x="-4.2" y="-0.2" width="8.4" height="3" rx="1.2" fill="#a86a35"/>'
-                                        '<path d="M-3 -2.6 H3" stroke="#c48a52" stroke-width="0.8"/>'),
-    "nattomaki": dict(kind=maki, core="".join(
-        f'<ellipse cx="{x}" cy="{y}" rx="1.9" ry="1.4" fill="#b98144"/><ellipse cx="{x - 0.5}" cy="{y - 0.5}" rx="0.8" ry="0.5" fill="#e6bd80"/>'
-        for x, y in ((-2.5, -1.5), (1.5, -2), (3, 1), (-1, 1.5), (-4, 1)))
-        + '<path d="M-4 -2 C-1 0 1 -1 4 2 M-3 2 C0 0 2 1 3 -2" fill="none" stroke="#fff8ea" stroke-width="0.4" opacity="0.9"/>'),
-    "shinkomaki": dict(kind=maki, core='<rect x="-4.6" y="-3.4" width="9.2" height="6.4" rx="1.2" fill="#ecc832"/>'
-                                        '<rect x="-4" y="-3" width="8" height="2" rx="1" fill="#f8e47a"/>'),
-    # 其他
-    "inari": dict(kind=inari),
-    "anago": dict(kind=nigiri, light="#e9bb84", base="#c98d50", shadow="#8f5a2c", side="#7a4a22",
-                  pattern="".join(f'<path d="M-36 {y} C-14 {y - 3} 10 {y + 2} 38 {y - 1}" fill="none" stroke="#f1cfa0" stroke-width="1.2" opacity="0.6"/>' for y in (-7, -2, 3))
-                  + '<ellipse cx="0" cy="-2" rx="26" ry="7" fill="#5e3216" opacity="0.35" filter="url(#soft)"/>'
-                  + glints([(-22, -7, 5, 1.4), (-6, -9.5, 7, 1.5), (12, -8, 4, 1.2), (-12, 3, 3, 1)])),
-    "unagi": dict(kind=nigiri, light="#b8703e", base="#8a4a22", shadow="#5a2d14", side="#4a2410",
-                  defs=ITEMS["tamago"]["defs"],
-                  pattern="".join(f'<path d="M{x} -14 l-5 28" stroke="#3a1a0c" stroke-width="3" opacity="0.5"/>' for x in (-22, -12, 10, 20))
-                  + '<path d="M-6 -16 H6 V16 H-6 Z" fill="url(#band)"/>'
-                  + glints([(-24, -6, 5, 1.4), (-14, -9, 4, 1.3), (12, -8, 5, 1.3), (22, -5, 3, 1.1)])),
-    # 副菜
-    "misoshiru": dict(kind=misoshiru),
-    "chawanmushi": dict(kind=chawanmushi),
-    "wasabi": dict(kind=wasabi),
-    "gari": dict(kind=gari),
-    "udon": dict(kind=udon),
-})
-
-
-# ---------- 每种寿司自己的外形 ----------
-# 大部分握寿司原本共用同一个月牙形，只换颜色和花纹，看起来都差不多。
-# 这里按实物的切法给每种画出自己的轮廓：用上下两条边缘曲线描述一片鱼，
-# 自动生成顶面和前缘露出来的侧面。
-
-# 屏幕上的「往下」，换算到一贯寿司自己的坐标里（抵消 rotate(-30) 和 scale(0.86)）
-DOWN = (-0.58, 1.0)
 
 
 def poly(points):
     return "M" + " L".join(f"{f(x)} {f(y)}" for x, y in points) + " Z"
 
 
-def slice_shape(x0, x1, top, bot, drop, n=64):
-    """top(t) / bot(t)：t 从 0 到 1（左到右）处上、下边缘的 y；drop(t)：这一处侧面露出来的厚度。
-    返回（顶面路径，侧面路径）。"""
-    pts = [(x0 + (x1 - x0) * i / n, i / n) for i in range(n + 1)]
-    T = [(x, top(t)) for x, t in pts]
-    B = [(x, bot(t)) for x, t in pts]
-    D = [(x + DOWN[0] * drop(t), y + DOWN[1] * drop(t)) for (x, y), (_, t) in zip(B, pts)]
-    return poly(T + B[::-1]), poly(B + D[::-1])
+def polyline(points):
+    return "M" + " L".join(f"{f(x)} {f(y)}" for x, y in points)
 
 
 def sinp(t, p):
     return max(0.0, math.sin(math.pi * t)) ** p
 
 
-def slab(half_top, half_bot, arch=1.2, r=2.5, corner=0.06):
-    """厚切的方块：上缘微微拱起，两头是平的切口，四角稍圆。"""
-    def rounding(t):
-        return r * (max(0, 1 - t / corner) ** 2 + max(0, 1 - (1 - t) / corner) ** 2)
-    return (lambda t: -half_top - arch * sinp(t, 1) + rounding(t),
-            lambda t: half_bot + 0.4 * arch * sinp(t, 1) - rounding(t))
+def proj(ox, oy, x, y, z, yaw=YAW):
+    """3D → 屏幕。x 左右、y 向上、z 朝向看的人。"""
+    xr = x * math.cos(yaw) - z * math.sin(yaw)
+    zr = x * math.sin(yaw) + z * math.cos(yaw)
+    return (ox + xr, oy - y * COS_E + zr * SIN_E)
 
 
-def ends_drop(base, extra, p=1.5):
-    """两头搭在饭团外面往下垂：中间薄、两头厚。"""
-    return lambda t: base + extra * (1 - sinp(t, 1)) ** p
+def hull(points):
+    """二维凸包。"""
+    pts = sorted(set((round(x, 2), round(y, 2)) for x, y in points))
+
+    def cross(o, a, b):
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+    lower, upper = [], []
+    for p in pts:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0:
+            lower.pop()
+        lower.append(p)
+    for p in reversed(pts):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0:
+            upper.pop()
+        upper.append(p)
+    return lower[:-1] + upper[:-1]
 
 
-def inner_rim(shape, color, width=4, opacity=0.5):
-    """沿着轮廓内侧压一圈颜色（边缘变暗或变亮）。"""
-    return f'<path d="{shape}" fill="none" stroke="{color}" stroke-width="{width}" opacity="{opacity}" filter="url(#soft)"/>'
+def bumpy(outline, seed, step=2.2, bump=(0.5, 1.1)):
+    """把轮廓的边缘做成一粒粒鼓起来（米饭）。"""
+    rnd = random.Random(seed)
+    cx = sum(p[0] for p in outline) / len(outline)
+    cy = sum(p[1] for p in outline) / len(outline)
+    dense = []
+    for i in range(len(outline)):
+        (x0, y0), (x1, y1) = outline[i], outline[(i + 1) % len(outline)]
+        seg = max(1, int(math.hypot(x1 - x0, y1 - y0) / step))
+        dense += [(x0 + (x1 - x0) * k / seg, y0 + (y1 - y0) * k / seg) for k in range(seg)]
+    d = f"M{f(dense[0][0])} {f(dense[0][1])}"
+    for i in range(len(dense)):
+        (x0, y0), (x1, y1) = dense[i], dense[(i + 1) % len(dense)]
+        mx, my = (x0 + x1) / 2, (y0 + y1) / 2
+        nx, ny = mx - cx, my - cy
+        n = math.hypot(nx, ny) or 1
+        b = rnd.uniform(*bump)
+        d += f" Q{f(mx + nx / n * b)} {f(my + ny / n * b)} {f(x1)} {f(y1)}"
+    return d + " Z"
 
 
-def reshape(name, shape_side, **extra):
-    shape, side = shape_side
-    ITEMS[name].update(shape=shape, side_shape=side, **extra)
-    return shape
+def loaf(ox, oy, a, c, h, yaw=YAW, p=0.55):
+    """圆角长方块投影后的轮廓（饭团、豆皮）。"""
+    pts = []
+    for i in range(40):
+        t = 2 * math.pi * i / 40
+        cx, sz = math.cos(t), math.sin(t)
+        x = a * math.copysign(abs(cx) ** p, cx)
+        z = c * math.copysign(abs(sz) ** p, sz)
+        for y, k in ((0, 1), (h * 0.75, 1), (h, 0.8)):
+            pts.append(proj(ox, oy, x * k, y, z * k, yaw))
+    return hull(pts)
 
 
-# 金枪鱼系：厚切方块，侧面露出切口
-TUNA = slice_shape(-30, 31, *slab(11, 9.5), lambda t: 4.5)
-for name in ("maguro", "chutoro", "otoro"):
-    reshape(name, TUNA, drape=False)
-reshape("katsuo", slice_shape(-30, 31, *slab(11, 9.5), lambda t: 5.5), drape=False, side="#8e1d2c")
+def grains(ox, oy, a, c, h, seed, n=16, yaw=YAW):
+    """饭团正面几道短弧线，暗示一粒粒的米。"""
+    rnd = random.Random(seed)
+    out = ""
+    for _ in range(n):
+        x, y = proj(ox, oy, rnd.uniform(-a * 0.85, a * 0.85), rnd.uniform(1.5, h * 0.7), c, yaw)
+        out += (f'<path d="M{f(x)} {f(y)} q1.3 {f(rnd.uniform(0.5, 1))} 2.6 0" transform="rotate({rnd.randint(-25, 25)} {f(x)} {f(y)})" '
+                f'fill="none" stroke="#cfd5dc" stroke-width="0.7" stroke-linecap="round"/>')
+    return out
 
-# 鲭鱼：醋腌后切成厚块，侧面是白色的鱼肉断面
-reshape("saba", slice_shape(-29, 30, *slab(10, 9), lambda t: 6), drape=False)
 
-# 光物：整片鱼片，两头尖
-reshape("aji", slice_shape(-36, 37, lambda t: -11 * sinp(t, 0.55) * (1 - 0.15 * t), lambda t: 9.5 * sinp(t, 0.55),
-                           ends_drop(2, 4)))
-IWASHI = reshape("iwashi", slice_shape(-38, 38, lambda t: -8.5 * sinp(t, 0.5), lambda t: 7.5 * sinp(t, 0.5), ends_drop(2, 5)))
-ITEMS["iwashi"]["pattern"] = (back_band("url(#back)", -0.5)
-                              # 沙丁鱼的标志：侧面一排大黑点（竹荚鱼没有）
-                              + "".join(f'<circle cx="{x}" cy="{f(1 - abs(x) * 0.02)}" r="1.7" fill="#1a2733"/>' for x in range(-27, 30, 6))
-                              + glints([(-20, -5, 4, 1.1), (-4, -6.5, 5, 1.2), (12, -5.5, 3.5, 1)]))
-reshape("sanma", slice_shape(-44, 44, lambda t: -7 * sinp(t, 0.45), lambda t: 6.5 * sinp(t, 0.45), ends_drop(2, 6)))
-ITEMS["sanma"]["pattern"] = (back_band("url(#back)", 0.5)
-                             + '<path d="M-44 1.5 C-10 -0.5 15 -1 44 0.5" fill="none" stroke="#ffffff" stroke-width="1.4"/>'
-                             + glints([(-24, -4, 5, 1.1), (-6, -5, 6, 1.2), (14, -4.5, 4, 1)]))
-ITEMS["sanma"]["over"] = scallions([(-5, -3.5), (1, -4.5), (6, -3), (-1, 0)], r=2)
-# 斑鰶：鱼片尾端留着分叉的鱼尾
-reshape("kohada", slice_shape(-32, 32, lambda t: -10 * sinp(t, 0.55), lambda t: 9 * sinp(t, 0.55), ends_drop(2, 4)),
-        under='<path d="M28 -1 L43 -10 L39 0.5 L43 10 L28 2.5 Z" fill="#8f9c9a"/>'
-              '<path d="M31 0 L41 -7 M31 1.5 L41 7" stroke="#5f6c6a" stroke-width="0.8"/>')
+def rice(ox, oy, seed, a=21, c=11.5, h=15, yaw=YAW):
+    out = f'<path d="{bumpy(loaf(ox, oy, a, c, h, yaw), seed)}" fill="url(#rice)" stroke="#c2c8d0" stroke-width="0.6"/>'
+    return out + grains(ox, oy, a, c, h, seed, yaw=yaw)
 
-# 赤贝：展开成蝴蝶形，边缘是一圈褶边，中间一道切口
-AKAGAI = reshape("akagai", slice_shape(
-    -33, 34,
-    lambda t: -(10.5 + 1.3 * math.sin(t * math.pi * 14)) * sinp(t, 0.45),
-    lambda t: (9.5 + 1.3 * math.sin(t * math.pi * 14 + 1.3)) * sinp(t, 0.45),
-    ends_drop(2.5, 3)))
-ITEMS["akagai"]["pattern"] = (inner_rim(AKAGAI, "#ffc3a3", 2.6, 0.9)
-                              + '<path d="M-24 -1 C-8 -3 8 -3 26 -1" fill="none" stroke="#a82a17" stroke-width="1.4"/>'
-                              + ridge_light() + STD_GLINTS)
-# 海螺：薄片，边缘呈波浪，外圈是深灰褐色
-TSUBU = reshape("tsubugai", slice_shape(
-    -32, 33,
-    lambda t: -(10 + 0.9 * math.sin(t * math.pi * 9)) * sinp(t, 0.5),
-    lambda t: (9 + 0.9 * math.sin(t * math.pi * 9 + 2)) * sinp(t, 0.5),
-    ends_drop(2, 3)))
-ITEMS["tsubugai"]["pattern"] = (inner_rim(TSUBU, "#7d6c58", 6, 0.6)
-                                + "".join(f'<path d="M{x} -8 l1 4" stroke="#dcd2c1" stroke-width="0.8"/>' for x in range(-22, 26, 4))
-                                + STD_GLINTS)
-# 北极贝：一头宽、一头收成尖尖的鸟嘴，尖端是红的，中间一道切口
-reshape("hokkigai", slice_shape(
-    -32, 37,
-    lambda t: -12 * (1 - t ** 2) ** 0.8 * sinp(t, 0.25),
-    lambda t: 10 * (1 - t ** 2) ** 0.8 * sinp(t, 0.25),
-    ends_drop(2, 3)))
-ITEMS["hokkigai"]["pattern"] = ('<path d="M2 -16 H40 V16 H2 Z" fill="url(#tip)" filter="url(#soft)"/>'
-                                '<path d="M8 -0.5 L37 0" stroke="#ffffff" stroke-width="1.2"/>'
-                                '<path d="M8 0.5 L37 0.5" stroke="#b8323f" stroke-width="0.8" opacity="0.6"/>' + STD_GLINTS)
-# 鲍鱼：厚厚的椭圆一片，表面交叉刀纹，外圈颜色深
-AWABI = reshape("awabi", slice_shape(-26, 26, lambda t: -12.5 * sinp(t, 0.5), lambda t: 11 * sinp(t, 0.5), lambda t: 4), drape=False)
-ITEMS["awabi"]["pattern"] = (crosshatch("#b5a674", step=4, width=0.7) + inner_rim(AWABI, "#6e6a40", 4) + STD_GLINTS)
 
-# 螃蟹：两根蟹腿并排，每根上面红、下面白，带纤维
-reshape("kani", slice_shape(-33, 34, lambda t: -10.5 * sinp(t, 0.25), lambda t: 10 * sinp(t, 0.25), lambda t: 3), drape=False)
-ITEMS["kani"]["pattern"] = (
-    "".join(f'<path d="M-40 {y} H40" stroke="#e6dbd0" stroke-width="0.7"/>' for y in (-3, -1.5, 6, 7.5, 9))
-    + '<path d="M-40 -12 H40 V-4.5 C20 -5.5 -10 -5 -40 -4 Z" fill="url(#crab)"/>'
-    + '<path d="M-40 0 H40 V4.5 C20 3.5 -10 4 -40 5 Z" fill="url(#crab)"/>'
-    + '<path d="M-40 -0.2 H40" stroke="#c9bdb1" stroke-width="1.2"/><path d="M-40 0.8 H40" stroke="#ffffff" stroke-width="0.8"/>'
-    + glints([(-20, -9, 6, 1.3), (6, -9, 5, 1.2), (-12, 1.5, 6, 1.2), (14, 1.5, 4, 1)]))
+def contact_shadow(ox, oy, rx=30, ry=5):
+    return f'<ellipse cx="{f(ox)}" cy="{f(oy + 2)}" rx="{rx}" ry="{ry}" fill="#1c2b36" opacity="0.12"/>'
 
-# 章鱼：上缘被吸盘撑得一鼓一鼓的，紫红色的皮
-TAKO_TOP = lambda t: -(10 + 1.6 * abs(math.sin(t * math.pi * 7))) * sinp(t, 0.5)
-reshape("tako", slice_shape(-33, 34, TAKO_TOP, lambda t: 9 * sinp(t, 0.5), ends_drop(2, 3)))
-ITEMS["tako"]["pattern"] = (back_band("url(#skin)", -3)
-                            + "".join(
-                                f'<circle cx="{f(-33 + 67 * t)}" cy="{f(TAKO_TOP(t) + 3.2)}" r="2.2" fill="#f2c4d0"/>'
-                                f'<circle cx="{f(-33 + 67 * t)}" cy="{f(TAKO_TOP(t) + 3.2)}" r="1" fill="#d996aa"/>'
-                                for t in [(i + 0.5) / 7 for i in range(1, 6)])
-                            + STD_GLINTS)
 
-# 星鳗：又长又软，边缘蓬松，两头大幅垂下来
-reshape("anago", slice_shape(
-    -39, 40,
-    lambda t: -(12.5 + 0.8 * math.sin(t * math.pi * 11)) * sinp(t, 0.3),
-    lambda t: (11 + 0.8 * math.sin(t * math.pi * 9 + 1)) * sinp(t, 0.3),
-    ends_drop(3, 7)))
-# 鳗鱼：方正的鱼片，带烤痕和海苔带
-reshape("unagi", slice_shape(-31, 32, *slab(10.5, 9.5, arch=0.6, r=2), lambda t: 3), drape=False)
+DEFS = """  <defs>
+    <filter id="soft" x="-20%" y="-50%" width="140%" height="200%"><feGaussianBlur stdDeviation="0.7"/></filter>
+    <linearGradient id="plate" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#eef1f4"/></linearGradient>
+    <linearGradient id="rice" x1="0" y1="0" x2="0" y2="1"><stop offset="0.3" stop-color="#fdfdfb"/><stop offset="1" stop-color="#dde2e8"/></linearGradient>
+    <linearGradient id="nori" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2b3830"/><stop offset="0.35" stop-color="#3d4c43"/><stop offset="1" stop-color="#18201b"/></linearGradient>
+    <radialGradient id="roe" cx="0.36" cy="0.32" r="0.72"><stop offset="0" stop-color="#ffc99c"/><stop offset="0.4" stop-color="#f7702e"/><stop offset="0.85" stop-color="#cf3c10"/><stop offset="1" stop-color="#93270a"/></radialGradient>
+  </defs>
+"""
+
+PLATE = """  <ellipse cx="60" cy="91" rx="50" ry="2.5" fill="#1c2b36" opacity="0.10"/>
+  <ellipse cx="60" cy="67.5" rx="57" ry="22" fill="#cfd6dc" stroke="#bcc5cd" stroke-width="0.6"/>
+  <ellipse cx="60" cy="65" rx="57" ry="22" fill="url(#plate)" stroke="#c9d0d7" stroke-width="0.6"/>
+  <ellipse cx="60" cy="66.2" rx="45" ry="16.5" fill="#eef1f4"/>
+  <ellipse cx="60" cy="65.8" rx="44" ry="15.9" fill="#f7f9fa"/>
+  <path d="M8 61 C14 50 32 44 54 43" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+"""
+
+
+def svg(body, extra_defs="", plate=True):
+    defs = DEFS.replace("  </defs>\n", extra_defs + "  </defs>\n")
+    return f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{VIEW}">\n{defs}{PLATE if plate else ""}{body}</svg>\n'
+
+
+def glints_at(spots):
+    """湿润感：几道白色小笔触，spots 是 (x, y, 长, 粗)。"""
+    return "".join(
+        f'<path d="M{f(x)} {f(y)} l{f(l)} {f(-l * 0.2)}" stroke="#fff" stroke-width="{f(w)}" stroke-linecap="round" opacity="0.9"/>'
+        for x, y, l, w in spots)
+
+
+# ---------- 鱼片 ----------
+
+class Slice:
+    """一片趴在饭团上的鱼片（饭团：长 2a、深 2c、高 hr）。
+
+    L 长度；W 宽度（前后）；T 厚度；taper 右头收尖的程度；wp 两头圆钝（小）还是尖（大）；
+    droop 前后两边往下包的程度；crown 中间鼓起多少；endh 两头离盘子的高度；
+    ripple / rf 边缘起伏（星鳗、赤贝、章鱼）；zoff 前后偏移（甜虾、蟹腿两条并排）。
+    """
+
+    def __init__(self, ox, oy, a=21, c=11.5, hr=15, L=66, W=25.5, T=2.6, taper=0.25, wp=0.42,
+                 droop=0.22, crown=1.4, endh=0.8, ripple=0.0, rf=13, zoff=0.0, seed=0):
+        self.ox, self.oy, self.a, self.c, self.hr = ox, oy, a, c, hr
+        self.L, self.W, self.T = L, W, T
+        self.taper, self.wp, self.droop, self.crown, self.endh = taper, wp, droop, crown, endh
+        self.ripple, self.rf, self.zoff = ripple, rf, zoff
+        self.phase = random.Random(seed).uniform(0, 6)
+
+    def xyz(self, u, v):
+        x = -self.L / 2 + self.L * u
+        w = self.W / 2 * sinp(u, self.wp) * (1 - self.taper * u)
+        w *= 1 + self.ripple * math.sin(u * math.pi * self.rf + self.phase + (1.3 if v > 0 else 0))
+        z = w * v + self.zoff
+        top = self.hr + 1.2
+        # 顺着饭团圆滑地垂下去，没有硬转折
+        r = min(1.0, abs(x) / (self.L / 2))
+        base = self.endh + (top - self.endh) * (1 - r ** 2.6) ** 0.75
+        # 前后两边往下包，中间微微鼓起
+        y = base * (1 - self.droop * v * v) + self.crown * (1 - v * v) * (base / top)
+        return x, y, z
+
+    def P(self, u, v):
+        return proj(self.ox, self.oy, *self.xyz(u, v))
+
+    def us(self, n=44):
+        return [i / n for i in range(n + 1)]
+
+    def top(self):
+        return poly([self.P(u, -1) for u in self.us()] + [self.P(u, 1) for u in reversed(self.us())])
+
+    def side(self):
+        """前缘露出来的一条厚度。"""
+        front = [self.P(u, 1) for u in self.us()]
+        drop = self.T * COS_E
+        under = [(x, y + drop * (0.4 + 0.6 * sinp(u, 0.6))) for (x, y), u in zip(front, self.us())]
+        return poly(front + under[::-1])
+
+    def band(self, v1, v2, u0=0.0, u1=1.0, n=30):
+        us = [u0 + (u1 - u0) * i / n for i in range(n + 1)]
+        return poly([self.P(u, v1) for u in us] + [self.P(u, v2) for u in reversed(us)])
+
+    def line(self, v, u0=0.02, u1=0.98, n=28):
+        return polyline([self.P(u0 + (u1 - u0) * i / n, v) for i in range(n + 1)])
+
+    def across(self, u, v0=-1, v1=1, n=12, wobble=0.0, k=0):
+        return polyline([self.P(u + wobble * math.sin((v0 + (v1 - v0) * i / n) * 5 + k), v0 + (v1 - v0) * i / n)
+                         for i in range(n + 1)])
+
+    def glint(self, u, v, length=0.1, width=1.3, opacity=0.9):
+        pts = [self.P(u + length * i / 4, v - 0.08 * i / 4) for i in range(5)]
+        return (f'<path d="{polyline(pts)}" fill="none" stroke="#fff" stroke-width="{width}" '
+                f'stroke-linecap="round" opacity="{opacity}"/>')
+
+
+def slice_layers(s, item, sid):
+    """一片鱼的侧面、顶面、花纹和描边。"""
+    cid = f"c{sid}"
+    grad = (f'<linearGradient id="t{sid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="{item["light"]}"/>'
+            f'<stop offset="0.55" stop-color="{item["base"]}"/><stop offset="1" stop-color="{item["shadow"]}"/></linearGradient>')
+    out = f'<defs>{grad}<clipPath id="{cid}"><path d="{s.top()}"/></clipPath></defs>'
+    out += f'<path d="{s.side()}" fill="{item["side"]}" stroke="{item["line"]}" stroke-width="0.7" stroke-linejoin="round"/>'
+    out += f'<path d="{s.top()}" fill="url(#t{sid})"/>'
+    out += f'<g clip-path="url(#{cid})">{pattern_of(item, s, sid)}'
+    # 两头垂下去的地方暗一点，前缘往下包的地方暗一点，中间拱起来的地方亮一点
+    out += f'<path d="{s.band(-1, 1, 0, 0.16)}" fill="{item["shadow"]}" opacity="0.5" filter="url(#soft)"/>'
+    out += f'<path d="{s.band(-1, 1, 0.84, 1)}" fill="{item["shadow"]}" opacity="0.5" filter="url(#soft)"/>'
+    out += f'<path d="{s.band(0.55, 1)}" fill="{item["shadow"]}" opacity="0.25" filter="url(#soft)"/>'
+    out += f'<path d="{s.line(-0.4, 0.22, 0.78)}" fill="none" stroke="#fff" stroke-width="3" opacity="{item.get("sheen", 0.3)}" filter="url(#soft)"/>'
+    out += "</g>"
+    out += f'<path d="{s.top()}" fill="none" stroke="{item["line"]}" stroke-width="0.7" stroke-linejoin="round"/>'
+    return out
+
+
+def pattern_of(item, s, sid):
+    p = item.get("pattern")
+    if p is None:
+        return ""
+    return p(s, sid) if item.get("seeded") else p(s)
+
+
+def nigiri(name, item):
+    """握寿司：每贯一个饭团，上面盖一片（或并排几条）鱼。"""
+    body = ""
+    for i, (ox, oy) in enumerate(PAIR):
+        sid = f"{name}{i}"
+        shape = item.get("shape", {})
+        strips = item.get("strips", [0.0])  # 甜虾、蟹腿：前后并排几条
+        slices = [Slice(ox, oy, seed=f"{sid}{k}", zoff=z, **shape) for k, z in enumerate(strips)]
+        out = contact_shadow(ox, oy)
+        out += "".join(item.get("under", lambda s: "")(s) for s in slices)
+        out += rice(ox, oy, f"{sid}r")
+        for k, s in enumerate(slices):
+            out += slice_layers(s, item, f"{sid}{k}")
+        out += "".join(item.get("over", lambda s: "")(s) for s in slices[:1])
+        body += f"  <g>{out}</g>\n"
+    return svg(body, item.get("defs", ""))
+
+
+# ---------- 配料 ----------
+
+def scallions(spots, r=1.9):
+    return "".join(
+        f'<circle cx="{f(x)}" cy="{f(y)}" r="{f(r)}" fill="#4f9a3a" stroke="#356e27" stroke-width="0.4"/>'
+        f'<circle cx="{f(x - 0.25)}" cy="{f(y - 0.25)}" r="{f(r * 0.65)}" fill="#86c25e"/>'
+        f'<circle cx="{f(x - 0.15)}" cy="{f(y - 0.15)}" r="{f(r * 0.3)}" fill="#e6f4d6"/>'
+        for x, y in spots)
+
+
+def ginger_dot(x, y, r=3):
+    """一小点黄色姜泥（竹荚鱼、沙丁鱼、鱿鱼、白子……）。"""
+    return (f'<ellipse cx="{f(x)}" cy="{f(y)}" rx="{f(r)}" ry="{f(r * 0.7)}" fill="#f0cf5e" stroke="#c9a43a" stroke-width="0.5"/>'
+            f'<ellipse cx="{f(x - 0.6)}" cy="{f(y - 0.5)}" rx="{f(r * 0.45)}" ry="{f(r * 0.25)}" fill="#fff3c0"/>')
+
+
+def ginger_scallion(x, y):
+    """姜泥 + 葱花一小撮（竹荚鱼、鲣鱼）。"""
+    return ginger_dot(x, y, 4) + scallions([(x - 4, y - 2), (x + 3.4, y - 2.8), (x + 0.2, y + 0.8), (x - 1.2, y - 3.6)], r=2.2)
+
+
+def momiji(x, y):
+    """红叶萝卜泥 + 细葱（比目鱼）。"""
+    rnd = random.Random("momiji")
+    out = (f'<path d="M{f(x - 5)} {f(y)} C{f(x - 6)} {f(y - 3.5)} {f(x - 2)} {f(y - 5.5)} {f(x)} {f(y - 5.5)} '
+           f'C{f(x + 3)} {f(y - 5.5)} {f(x + 6)} {f(y - 3.5)} {f(x + 5)} {f(y)} C{f(x + 4)} {f(y + 2)} {f(x - 4)} {f(y + 2)} {f(x - 5)} {f(y)} Z" '
+           f'fill="#ef8a5a" stroke="#c9602f" stroke-width="0.5"/>')
+    out += f'<path d="M{f(x - 3)} {f(y - 3)} C{f(x - 1)} {f(y - 4.5)} {f(x + 2)} {f(y - 4.5)} {f(x + 3)} {f(y - 3)}" fill="none" stroke="#ffc39c" stroke-width="1" stroke-linecap="round"/>'
+    for _ in range(7):
+        out += f'<circle cx="{f(x + rnd.uniform(-3.5, 3.5))}" cy="{f(y + rnd.uniform(-4, 0))}" r="0.45" fill="#c9562a"/>'
+    return out + scallions([(x + 5.5, y - 3), (x + 7, y + 0.2)], r=1.4)
+
+
+def onion_slivers(x, y):
+    """洋葱丝 + 葱花（炙烤长鳍金枪鱼）。"""
+    out = ""
+    for dx, dy, w in ((-6, 0, 8), (-1, -2.5, 9), (2, 0.5, 7)):
+        d = f"M{f(x + dx)} {f(y + dy)} q{f(w / 2)} -3 {f(w)} 0"
+        out += f'<path d="{d}" fill="none" stroke="#d9d2c0" stroke-width="2.4" stroke-linecap="round"/>'
+        out += f'<path d="{d}" fill="none" stroke="#fffdf6" stroke-width="1.4" stroke-linecap="round"/>'
+    return out + scallions([(x - 2, y - 3.5), (x + 5, y - 2)], r=1.5)
+
+
+def shiso(s):
+    """比目鱼底下垫的紫苏叶：从鱼片后面露出锯齿状的绿叶边。"""
+    pts = []
+    n = 22
+    for i in range(n + 1):
+        u = 0.08 + 0.84 * i / n
+        x, y = proj(s.ox, s.oy, -s.L / 2 + s.L * u, s.hr * 0.6, -(s.c + 3 + 3 * sinp(u, 0.8)))
+        pts.append((x, y - (1.6 if i % 2 else 0)))
+    x0, y0 = proj(s.ox, s.oy, -s.L * 0.42, 0.5, 0)
+    x1, y1 = proj(s.ox, s.oy, s.L * 0.42, 0.5, 0)
+    vein = polyline([proj(s.ox, s.oy, -s.L / 2 + s.L * (0.1 + 0.8 * i / 10), s.hr * 0.65, -(s.c + 1.5)) for i in range(11)])
+    return (f'<path d="{poly([(x0, y0)] + pts + [(x1, y1)])}" fill="#4f9a3a" stroke="#356e27" stroke-width="0.6" stroke-linejoin="round"/>'
+            f'<path d="{vein}" fill="none" stroke="#8cc46a" stroke-width="0.8"/>')
+
+
+def tail(s, color="#e2452f", dark="#8f1f14", size=1.0):
+    """虾尾：从鱼片右头伸出来的扇形。"""
+    x, y = s.P(0.97, 0)
+    k = size
+    fan = [(x, y), (x + 9 * k, y - 9 * k), (x + 12 * k, y - 4 * k), (x + 13 * k, y + 1 * k), (x + 10 * k, y + 5 * k), (x + 2 * k, y + 2 * k)]
+    return (f'<path d="{poly(fan)}" fill="{color}" stroke="{dark}" stroke-width="0.6" stroke-linejoin="round"/>'
+            f'<path d="M{f(x + 2 * k)} {f(y)} L{f(x + 10 * k)} {f(y - 7 * k)} M{f(x + 2 * k)} {f(y + 0.5 * k)} L{f(x + 12 * k)} {f(y - 1 * k)} '
+            f'M{f(x + 2 * k)} {f(y + 1 * k)} L{f(x + 11 * k)} {f(y + 4 * k)}" stroke="{dark}" stroke-width="0.6" opacity="0.7"/>')
+
+
+# ---------- 各种鱼片的花纹 ----------
+
+def gl(*spots):
+    """在鱼片表面 (u, v) 放几道高光。"""
+    return lambda s: "".join(s.glint(*sp) for sp in spots)
+
+
+STD_GL = gl((0.3, -0.55, 0.11, 1.5), (0.48, -0.65, 0.08, 1.3), (0.62, -0.5, 0.09, 1.3))
+
+
+def combine(*parts):
+    return lambda s: "".join(p(s) for p in parts)
+
+
+def soft_band(v1, v2, color, opacity=0.85, u0=0.0, u1=1.0):
+    return lambda s: f'<path d="{s.band(v1, v2, u0, u1)}" fill="{color}" opacity="{opacity}" filter="url(#soft)"/>'
+
+
+def hard_band(v1, v2, color, opacity=1.0, u0=0.0, u1=1.0):
+    return lambda s: f'<path d="{s.band(v1, v2, u0, u1)}" fill="{color}" opacity="{opacity}"/>'
+
+
+def lines_along(vs, color, width=0.9, opacity=0.75):
+    return lambda s: "".join(f'<path d="{s.line(v)}" fill="none" stroke="{color}" stroke-width="{width}" opacity="{opacity}"/>' for v in vs)
+
+
+def lines_across(us, color, width=0.9, opacity=0.75, v0=-1, v1=1, wobble=0.0, slant=0.0):
+    def draw(s):
+        out = ""
+        for k, u in enumerate(us):
+            pts = []
+            for i in range(13):
+                v = v0 + (v1 - v0) * i / 12
+                pts.append(s.P(u + slant * v + wobble * math.sin(v * 5 + k), v))
+            out += f'<path d="{polyline(pts)}" fill="none" stroke="{color}" stroke-width="{width}" opacity="{opacity}"/>'
+        return out
+    return draw
+
+
+def dots_along(v, us, color, r=1.0):
+    return lambda s: "".join(f'<circle cx="{f(s.P(u, v)[0])}" cy="{f(s.P(u, v)[1])}" r="{r}" fill="{color}"/>' for u in us)
+
+
+def marble(seed, color, n=40, width=1.1):
+    """大腹的白色脂肪网。"""
+    def draw(s):
+        rnd = random.Random(seed)
+        out = ""
+        for _ in range(n):
+            u, v = rnd.uniform(0.08, 0.92), rnd.uniform(-0.95, 0.95)
+            du, dv = rnd.uniform(0.03, 0.07), rnd.uniform(-0.4, 0.4)
+            pts = [s.P(u + du * t, v + dv * t + 0.1 * math.sin(t * 3)) for t in (0, 0.33, 0.66, 1)]
+            out += f'<path d="{polyline(pts)}" fill="none" stroke="{color}" stroke-width="{width}" opacity="0.85" stroke-linecap="round"/>'
+        return out
+    return draw
+
+
+def blotches(seed, color, n=16, v_range=(-0.9, 0.7), size=(1.5, 4), opacity=0.6):
+    def draw(s):
+        rnd = random.Random(seed)
+        out = ""
+        for _ in range(n):
+            x, y = s.P(rnd.uniform(0.1, 0.9), rnd.uniform(*v_range))
+            out += (f'<ellipse cx="{f(x)}" cy="{f(y)}" rx="{f(rnd.uniform(*size))}" ry="{f(rnd.uniform(size[0] * 0.5, size[1] * 0.45))}" '
+                    f'transform="rotate({rnd.randint(-20, 20)} {f(x)} {f(y)})" fill="{color}" opacity="{opacity}" filter="url(#soft)"/>')
+        return out
+    return draw
+
+
+def mackerel_stripes(s):
+    """鲭鱼背上粗黑的斑马波浪纹。"""
+    out = ""
+    for k in range(13):
+        u = 0.1 + 0.064 * k
+        pts = [s.P(u + 0.018 * math.sin(v * 7 + k * 1.7), v) for v in [-1 + 1.45 * i / 10 for i in range(11)]]
+        out += f'<path d="{polyline(pts)}" fill="none" stroke="#12283a" stroke-width="{1.6 + 0.8 * (k % 2)}" opacity="0.95" stroke-linecap="round"/>'
+    return out
+
+
+def suckers(s):
+    """章鱼前缘的一排吸盘。"""
+    out = ""
+    for k in range(9):
+        u = 0.14 + 0.09 * k
+        x, y = s.P(u, 0.82)
+        out += f'<circle cx="{f(x)}" cy="{f(y)}" r="1.6" fill="#f2c4d0" stroke="#b9607d" stroke-width="0.4"/><circle cx="{f(x)}" cy="{f(y)}" r="0.7" fill="#d48aa2"/>'
+    return out
+
+
+def inner_rim(color, width=4, opacity=0.5):
+    return lambda s: f'<path d="{s.top()}" fill="none" stroke="{color}" stroke-width="{width}" opacity="{opacity}" filter="url(#soft)"/>'
+
+
+def slit(u0=0.3, u1=0.75, v=0.0):
+    return lambda s: (f'<path d="{s.line(v, u0, u1)}" fill="none" stroke="#ffffff" stroke-width="1.1" opacity="0.9"/>'
+                      f'<path d="{s.line(v + 0.08, u0, u1)}" fill="none" stroke="#000" stroke-width="0.5" opacity="0.18"/>')
+
+
+def over_at(u, v, fn):
+    return lambda s: fn(*s.P(u, v))
+
+
+def unagi_pattern(s, seed):
+    return (blotches(seed, "#2a1207")(s)
+            + lines_along((-0.55, -0.15, 0.25), "#c98545", 1, 0.55)(s)
+            + f'<path d="{s.line(-0.35, 0.15, 0.85)}" fill="none" stroke="#ffcf8f" stroke-width="3" opacity="0.45" filter="url(#soft)"/>'
+            + gl((0.2, -0.55, 0.14, 1.6), (0.42, -0.7, 0.1, 1.4), (0.62, -0.45, 0.12, 1.5), (0.36, 0.15, 0.08, 1.1), (0.7, 0.1, 0.06, 1.0))(s))
+
+
+# ---------- 方块（玉子） ----------
+
+def box_faces(ox, oy, x0, x1, y0, y1, z0, z1, yaw=YAW):
+    """返回看得见的面（按从后到前的顺序）：[(名字, 顶点)]。"""
+    P = lambda x, y, z: proj(ox, oy, x, y, z, yaw)
+    faces = {
+        "front": ([(x0, y0, z1), (x1, y0, z1), (x1, y1, z1), (x0, y1, z1)], (0, 0, 1)),
+        "back": ([(x0, y0, z0), (x1, y0, z0), (x1, y1, z0), (x0, y1, z0)], (0, 0, -1)),
+        "left": ([(x0, y0, z0), (x0, y0, z1), (x0, y1, z1), (x0, y1, z0)], (-1, 0, 0)),
+        "right": ([(x1, y0, z0), (x1, y0, z1), (x1, y1, z1), (x1, y1, z0)], (1, 0, 0)),
+        "top": ([(x0, y1, z0), (x1, y1, z0), (x1, y1, z1), (x0, y1, z1)], (0, 1, 0)),
+    }
+    out = []
+    for name, (corners, (nx, ny, nz)) in faces.items():
+        # 法线转到屏幕方向后，朝着看的人才画
+        nzr = nx * math.sin(yaw) + nz * math.cos(yaw)
+        if nzr * SIN_E + ny * COS_E > 0.02:
+            out.append((name, [P(*c) for c in corners]))
+    order = {"back": 0, "left": 1, "right": 1, "front": 2, "top": 3}
+    return sorted(out, key=lambda t: order[t[0]])
+
+
+def tamago(name, item):
+    body = ""
+    for i, (ox, oy) in enumerate(PAIR):
+        out = contact_shadow(ox, oy) + rice(ox, oy, f"{name}{i}r")
+        x0, x1, z0, z1, y0, y1 = -25, 25, -11, 11, 14, 23
+        colors = {"top": "#f8d755", "front": "#ebb935", "left": "#e2a92b", "right": "#e2a92b", "back": "#e2a92b"}
+        for face, pts in box_faces(ox, oy, x0, x1, y0, y1, z0, z1):
+            out += f'<path d="{poly(pts)}" fill="{colors[face]}" stroke="#b98318" stroke-width="0.7" stroke-linejoin="round"/>'
+            if face == "front":  # 侧面能看到一层层卷起来的纹
+                for yy in (16.5, 19, 21.5):
+                    a, b = proj(ox, oy, x0 + 1, yy, z1), proj(ox, oy, x1 - 1, yy, z1)
+                    out += f'<path d="M{f(a[0])} {f(a[1])} L{f(b[0])} {f(b[1])}" stroke="#c9901f" stroke-width="0.6" opacity="0.8"/>'
+            if face == "top":
+                for sx, sz in ((-18, -4), (-10, 5), (12, -6), (19, 4)):
+                    cx, cy = proj(ox, oy, sx, y1, sz)
+                    out += f'<ellipse cx="{f(cx)}" cy="{f(cy)}" rx="3" ry="1.1" fill="#d99a35" opacity="0.4"/>'
+                a, b = proj(ox, oy, -22, y1, -8), proj(ox, oy, -6, y1, -8)
+                out += f'<path d="M{f(a[0])} {f(a[1])} L{f(b[0])} {f(b[1])}" stroke="#fff6c8" stroke-width="1.6" stroke-linecap="round" opacity="0.9"/>'
+        # 海苔带：横跨顶面，顺着正面垂下来，一直包到饭团底
+        bx0, bx1 = -4, 4
+        band = [(bx0, y1, z0), (bx1, y1, z0), (bx1, y1, z1), (bx0, y1, z1)]
+        out += f'<path d="{poly([proj(ox, oy, *p) for p in band])}" fill="#2b3a31" stroke="#141b17" stroke-width="0.6"/>'
+        front = [(bx0, y1, z1), (bx1, y1, z1), (bx1, 0, z1 - 1), (bx0, 0, z1 - 1)]
+        out += f'<path d="{poly([proj(ox, oy, *p) for p in front])}" fill="#1d2822" stroke="#141b17" stroke-width="0.6"/>'
+        body += f"  <g>{out}</g>\n"
+    return svg(body)
+
+
+# ---------- 军舰卷 ----------
+
+GA, GC, GH = 17.5, 10.5, 15  # 军舰：海苔围成的椭圆筒，长 2*GA、深 2*GC、高 GH
+
+
+def ellipse_pts(ox, oy, a, c, y, t0=0, t1=2 * math.pi, n=40):
+    return [proj(ox, oy, a * math.cos(t0 + (t1 - t0) * i / n), y, c * math.sin(t0 + (t1 - t0) * i / n), 0) for i in range(n + 1)]
+
+
+def gunkan(name, item):
+    body = ""
+    for i, (ox, oy) in enumerate(PAIR):
+        sid = f"{name}{i}"
+        rnd = random.Random(sid)
+        out = contact_shadow(ox, oy, 24, 4.5)
+        out += item.get("behind", lambda ox, oy: "")(ox, oy)
+        # 后半圈海苔的内侧 + 料
+        out += f'<path d="{poly(ellipse_pts(ox, oy, GA, GC, GH))}" fill="#18201b" stroke="#0f1511" stroke-width="0.6"/>'
+        out += f'<path d="{poly(ellipse_pts(ox, oy, GA - 1.6, GC - 1.6, GH - 1))}" fill="{item["base"]}"/>'
+        out += item["filling"](ox, oy, rnd)
+        # 前半圈海苔：挡住料的前缘
+        front = ellipse_pts(ox, oy, GA, GC, GH, 0, math.pi) + ellipse_pts(ox, oy, GA, GC, 0, math.pi, 0)
+        out += f'<path d="{poly(front)}" fill="url(#nori)" stroke="#0f1511" stroke-width="0.6" stroke-linejoin="round"/>'
+        for k in range(3):
+            pts = ellipse_pts(ox, oy, GA + 0.1, GC + 0.1, GH * (0.3 + 0.22 * k) + rnd.uniform(-1, 1), 0.3, math.pi - 0.3, 16)
+            out += f'<path d="{polyline(pts)}" fill="none" stroke="#4d5f53" stroke-width="0.6" opacity="0.7"/>'
+        hx = ellipse_pts(ox, oy, GA, GC, GH * 0.8, math.pi * 0.62, math.pi * 0.75, 4)
+        out += f'<path d="{polyline(hx + [(x, y + 8) for x, y in reversed(hx)])}" fill="#ffffff" opacity="0.12"/>'
+        body += f"  <g>{out}</g>\n"
+    return svg(body, item.get("defs", ""))
+
+
+def scatter(ox, oy, rnd, n, a=GA - 2.5, c=GC - 2.5, base=GH - 1, dome=3.0):
+    """在军舰的料面上均匀撒点，按从后到前排好（后面的先画）。"""
+    pts = []
+    for _ in range(n):
+        t, r = rnd.uniform(0, 2 * math.pi), math.sqrt(rnd.random())
+        x, z = a * r * math.cos(t), c * r * math.sin(t)
+        y = base + dome * (1 - r * r)
+        pts.append((z, proj(ox, oy, x, y, z, 0)))
+    return [p for _, p in sorted(pts)]
+
+
+def cucumbers(ox, oy):
+    """军舰后面插着的两片黄瓜（藏寿司的做法）。"""
+    out = ""
+    for dx, rot in ((-7, -14), (2, 8)):
+        x, y = proj(ox, oy, dx, GH + 1, -GC + 2, 0)
+        out += (f'<g transform="translate({f(x)} {f(y)}) rotate({rot})">'
+                '<path d="M-7 0 A7 7.5 0 0 1 7 0 Z" fill="#2f6e2a" stroke="#1f4d1b" stroke-width="0.5"/>'
+                '<path d="M-5.8 0 A5.8 6.2 0 0 1 5.8 0 Z" fill="#cfe8a6"/>'
+                '<path d="M-3.8 0 A3.8 4 0 0 1 3.8 0 Z" fill="#e4f2c8"/>'
+                '<g fill="#f6fbea"><ellipse cx="-1.8" cy="-1.6" rx="0.5" ry="0.9"/><ellipse cx="0" cy="-2.3" rx="0.5" ry="0.9"/><ellipse cx="1.8" cy="-1.6" rx="0.5" ry="0.9"/></g></g>')
+    return out
+
+
+def ikura_fill(ox, oy, rnd):
+    out = ""
+    for x, y in scatter(ox, oy, rnd, 24):
+        out += (f'<circle cx="{f(x)}" cy="{f(y)}" r="2.7" fill="url(#roe)" stroke="#8a2408" stroke-width="0.4"/>'
+                f'<circle cx="{f(x + 0.6)}" cy="{f(y + 0.7)}" r="0.9" fill="#e0581f" opacity="0.8"/>'
+                f'<circle cx="{f(x - 0.9)}" cy="{f(y - 1)}" r="0.7" fill="#fff"/>')
+    return out
+
+
+def uni_fill(ox, oy, rnd):
+    out = ""
+    for x, y in scatter(ox, oy, rnd, 9, dome=2.5):
+        rot = rnd.randint(-30, 30)
+        out += (f'<g transform="translate({f(x)} {f(y)}) rotate({rot})"><ellipse rx="6" ry="2.6" fill="url(#uni)" stroke="#b9650f" stroke-width="0.5"/>'
+                '<path d="M-4 -1 C-1.5 -2 1.5 -2 4 -1" fill="none" stroke="#ffe3a0" stroke-width="0.8" stroke-linecap="round"/></g>')
+    for x, y in scatter(ox, oy, rnd, 30, dome=3):
+        out += f'<circle cx="{f(x)}" cy="{f(y)}" r="0.4" fill="#ffd98a" opacity="0.8"/>'
+    return out
+
+
+def tobikko_fill(ox, oy, rnd):
+    out = ""
+    for x, y in scatter(ox, oy, rnd, 110, dome=2.5):
+        out += f'<circle cx="{f(x)}" cy="{f(y)}" r="1.15" fill="#ff8a2a" stroke="#d2600f" stroke-width="0.25"/><circle cx="{f(x - 0.4)}" cy="{f(y - 0.4)}" r="0.35" fill="#fff1d2"/>'
+    return out
+
+
+def kanimiso_fill(ox, oy, rnd):
+    x, y = proj(ox, oy, 0, GH + 0.5, 0, 0)
+    out = f'<ellipse cx="{f(x)}" cy="{f(y)}" rx="{GA - 2}" ry="{f((GC - 2) * SIN_E + 1)}" fill="#86814b"/>'
+    out += (f'<path d="M{f(x - 10)} {f(y - 1)} C{f(x - 5)} {f(y - 3)} {f(x + 2)} {f(y - 2)} {f(x + 8)} {f(y - 1)}" fill="none" stroke="#b5ab68" stroke-width="2.5" opacity="0.8" filter="url(#soft)"/>'
+            f'<path d="M{f(x - 12)} {f(y + 2)} C{f(x - 5)} {f(y + 1)} {f(x + 3)} {f(y + 3)} {f(x + 12)} {f(y + 1.5)}" fill="none" stroke="#5d5930" stroke-width="2" opacity="0.7" filter="url(#soft)"/>')
+    for px, py in scatter(ox, oy, rnd, 8, dome=1.5):
+        out += f'<circle cx="{f(px)}" cy="{f(py)}" r="0.7" fill="#c96a3a" opacity="0.7"/>'
+    return out + glints_at([(x - 8, y - 2, 4, 1.1), (x + 3, y - 2.5, 3, 1)])
+
+
+def shirasu_fill(ox, oy, rnd):
+    out = ""
+    for x, y in scatter(ox, oy, rnd, 34, dome=3):
+        rot = rnd.randint(0, 180)
+        out += (f'<g transform="translate({f(x)} {f(y)}) rotate({rot})">'
+                '<path d="M-2.2 0 Q0 -1.2 2.2 0" fill="none" stroke="#c9c3b2" stroke-width="1.8"/>'
+                '<path d="M-2.2 0 Q0 -1.2 2.2 0" fill="none" stroke="#fdfbf3" stroke-width="1.1"/>'
+                '<circle cx="-2" cy="-0.1" r="0.4" fill="#2b2b2b"/></g>')
+    x, y = proj(ox, oy, 0, GH + 3, 0, 0)
+    return out + ginger_dot(x, y - 1, 2.6)
+
+
+def negitoro_fill(ox, oy, rnd):
+    x, y = proj(ox, oy, 0, GH + 0.5, 0, 0)
+    out = f'<ellipse cx="{f(x)}" cy="{f(y - 1)}" rx="{GA - 2}" ry="{f((GC - 2) * SIN_E + 2)}" fill="#ea8592"/>'
+    for px, py in scatter(ox, oy, rnd, 26, dome=3):
+        out += f'<circle cx="{f(px)}" cy="{f(py)}" r="{f(rnd.uniform(0.9, 1.7))}" fill="{rnd.choice(["#f6a7b1", "#d9677a"])}" opacity="0.8"/>'
+    return out + scallions([(p[0], p[1] - 1.5) for p in scatter(ox, oy, rnd, 7, dome=4)], r=1.8)
+
+
+# ---------- 卷物 ----------
+
+def maki(name, item):
+    r, h = 12, 15
+    body = ""
+    for i, (ox, oy) in enumerate([(86, 55), (60, 62), (34, 69)]):
+        rnd = random.Random(f"{name}{i}")
+        out = contact_shadow(ox, oy, 15, 3.5)
+        side = ellipse_pts(ox, oy, r, r, h, 0, math.pi) + ellipse_pts(ox, oy, r, r, 0, math.pi, 0)
+        out += f'<path d="{poly(side)}" fill="url(#nori)" stroke="#0f1511" stroke-width="0.6" stroke-linejoin="round"/>'
+        hx = ellipse_pts(ox, oy, r, r, h * 0.85, math.pi * 0.62, math.pi * 0.74, 4)
+        out += f'<path d="{polyline(hx + [(x, y + 8) for x, y in reversed(hx)])}" fill="#ffffff" opacity="0.14"/>'
+        out += f'<path d="{poly(ellipse_pts(ox, oy, r, r, h))}" fill="#1d2822" stroke="#0f1511" stroke-width="0.6"/>'
+        rice_top = bumpy(ellipse_pts(ox, oy, r - 1.6, r - 1.6, h, n=30)[:-1], f"{name}{i}", step=1.6, bump=(0.2, 0.5))
+        out += f'<path d="{rice_top}" fill="#fbfbf8" stroke="#c2c8d0" stroke-width="0.5"/>'
+        for _ in range(6):
+            t, rr = rnd.uniform(0, 2 * math.pi), rnd.uniform(4, 7)
+            x, y = proj(ox, oy, rr * math.cos(t), h, rr * math.sin(t), 0)
+            out += f'<path d="M{f(x)} {f(y)} q1 0.6 2 0" fill="none" stroke="#cfd5dc" stroke-width="0.6"/>'
+        # 芯是区分几种卷物的唯一线索，放大 1.5 倍
+        cx, cy = proj(ox, oy, 0, h, 0, 0)
+        out += f'<g transform="translate({f(cx)} {f(cy)}) scale(1.5) translate({f(-cx)} {f(-cy)})">{item["core"](ox, oy, h, rnd)}</g>'
+        body += f"  <g>{out}</g>\n"
+    return svg(body)
+
+
+def core_rect(w, d, fill, edge, top=None):
+    """卷物正中的芯：一块方的（俯视看压成扁的）。"""
+    def draw(ox, oy, h, rnd):
+        pts = [proj(ox, oy, x, h + 0.2, z, 0) for x, z in ((-w, -d), (w, -d), (w, d), (-w, d))]
+        out = f'<path d="{poly(pts)}" fill="{fill}" stroke="{edge}" stroke-width="0.6" stroke-linejoin="round"/>'
+        if top:
+            a, b = proj(ox, oy, -w + 0.6, h + 0.2, -d + 0.8, 0), proj(ox, oy, w - 0.6, h + 0.2, -d + 0.8, 0)
+            out += f'<path d="M{f(a[0])} {f(a[1])} L{f(b[0])} {f(b[1])}" stroke="{top}" stroke-width="1.2" stroke-linecap="round"/>'
+        return out
+    return draw
+
+
+def core_cucumber(ox, oy, h, rnd):
+    out = ""
+    for dx, dz in ((-2.6, -1.2), (2.4, -0.8), (0, 2)):
+        pts = [proj(ox, oy, dx + x, h + 0.2, dz + z, 0) for x, z in ((-2.2, -1.5), (2.2, -1.5), (2.2, 1.5), (-2.2, 1.5))]
+        out += f'<path d="{poly(pts)}" fill="#c5e397" stroke="#2f6e2a" stroke-width="0.9" stroke-linejoin="round"/>'
+    return out
+
+
+def core_natto(ox, oy, h, rnd):
+    out = ""
+    for _ in range(7):
+        x, y = proj(ox, oy, rnd.uniform(-3.5, 3.5), h + 0.5, rnd.uniform(-3, 3), 0)
+        out += f'<ellipse cx="{f(x)}" cy="{f(y)}" rx="1.6" ry="1.1" fill="#b98144" stroke="#8a5a28" stroke-width="0.3"/><ellipse cx="{f(x - 0.4)}" cy="{f(y - 0.4)}" rx="0.6" ry="0.35" fill="#e6bd80"/>'
+    x, y = proj(ox, oy, 0, h + 0.6, 0, 0)
+    return out + f'<path d="M{f(x - 3)} {f(y - 1)} C{f(x - 1)} {f(y + 1)} {f(x + 1)} {f(y - 1.5)} {f(x + 3)} {f(y + 0.8)}" fill="none" stroke="#fff8ea" stroke-width="0.4" opacity="0.9"/>'
+
+
+def core_kanpyo(ox, oy, h, rnd):
+    out = ""
+    for dz, c in ((-1.6, "#8a5428"), (1.2, "#a86a35")):
+        pts = [proj(ox, oy, x, h + 0.2, dz + z, 0) for x, z in ((-4, -1.3), (4, -1.3), (4, 1.3), (-4, 1.3))]
+        out += f'<path d="{poly(pts)}" fill="{c}" stroke="#5e3614" stroke-width="0.5" stroke-linejoin="round"/>'
+    return out
+
+
+# ---------- 豆皮寿司 ----------
+
+def inari(name, item):
+    body = ""
+    for i, (ox, oy) in enumerate(PAIR):
+        rnd = random.Random(f"{name}{i}")
+        out = contact_shadow(ox, oy)
+        outline = loaf(ox, oy, 22, 12, 13, p=0.5)
+        out += f'<path d="{bumpy(outline, f"{name}{i}", step=4, bump=(0.1, 0.4))}" fill="url(#inari)" stroke="#8f561c" stroke-width="0.7"/>'
+        # 顶面亮一点
+        top = [proj(ox, oy, 18 * math.cos(t), 13, 9 * math.sin(t)) for t in [2 * math.pi * k / 30 for k in range(30)]]
+        out += f'<path d="{poly(top)}" fill="#f0c27e" opacity="0.6" filter="url(#soft)"/>'
+        for _ in range(28):
+            x, y = proj(ox, oy, rnd.uniform(-19, 19), rnd.uniform(3, 13), rnd.uniform(-10, 12))
+            out += f'<circle cx="{f(x)}" cy="{f(y)}" r="{f(rnd.uniform(0.4, 0.9))}" fill="#a8651f" opacity="0.5"/>'
+        for _ in range(7):  # 几粒芝麻
+            x, y = proj(ox, oy, rnd.uniform(-14, 14), 13.2, rnd.uniform(-7, 7))
+            out += f'<ellipse cx="{f(x)}" cy="{f(y)}" rx="0.9" ry="0.45" transform="rotate({rnd.randint(-40, 40)} {f(x)} {f(y)})" fill="{rnd.choice(["#2b2b2b", "#fff4dc"])}"/>'
+        a, b = proj(ox, oy, -16, 12, -8), proj(ox, oy, 6, 13, -9)
+        out += glints_at([(a[0], a[1], 6, 1.3), (b[0], b[1], 4, 1.1)])
+        body += f"  <g>{out}</g>\n"
+    defs = '    <linearGradient id="inari" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e9b56a"/><stop offset="0.6" stop-color="#d4934a"/><stop offset="1" stop-color="#b8762f"/></linearGradient>\n'
+    return svg(body, defs)
+
+
+# ---------- 副菜：碗、杯子、小碟 ----------
+
+def bowl(defs, outer, rim, soup, contents, band=""):
+    body = f"""  <g transform="translate(0 4)">
+  <ellipse cx="60" cy="87" rx="42" ry="4" fill="#1c2b36" opacity="0.12"/>
+  <ellipse cx="60" cy="80" rx="18" ry="4.5" fill="#1c2b36" opacity="0.25"/>
+  <path d="M14 40 C16 64 36 81 60 81 C84 81 104 64 106 40 Z" fill="{outer}" stroke="#1c1416" stroke-width="0.7"/>
+  {band}
+  <path d="M22 52 C28 66 40 74 52 76" fill="none" stroke="#fff" stroke-width="2.4" opacity="0.25" stroke-linecap="round"/>
+  <ellipse cx="60" cy="40" rx="46" ry="17.5" fill="{rim}" stroke="#1c1416" stroke-width="0.7"/>
+  <ellipse cx="60" cy="41.2" rx="41.5" ry="15" fill="{soup}"/>
+  {contents}
+  </g>
+"""
+    return svg(body, defs, plate=False)
+
+
+def misoshiru(name, item):
+    c = '<path d="M30 40 C40 34 56 36 64 40 C72 44 84 42 90 38" fill="none" stroke="#e2b27a" stroke-width="6" opacity="0.5" filter="url(#soft)"/>'
+    for x, y, r in ((44, 38, -8), (62, 45, 12), (76, 37, 4)):  # 豆腐
+        c += (f'<g transform="translate({x} {y}) rotate({r})"><rect x="-4.5" y="-2.5" width="9" height="6.5" rx="1" fill="#e9e3d6" stroke="#c9c0ae" stroke-width="0.5"/>'
+              '<rect x="-4.5" y="-3.5" width="9" height="5" rx="1" fill="#fffdf6" stroke="#c9c0ae" stroke-width="0.5"/></g>')
+    for x, y in ((52, 47), (70, 41), (38, 44)):  # 海带
+        c += (f'<path d="M{x - 5} {y} C{x - 3} {y - 4} {x + 3} {y - 4} {x + 6} {y - 1} C{x + 2} {y + 2} {x - 2} {y + 3} {x - 5} {y} Z" fill="#2f5a2a"/>'
+              f'<path d="M{x - 3} {y - 1} C{x} {y - 3} {x + 3} {y - 2} {x + 4} {y - 1}" fill="none" stroke="#4f7d45" stroke-width="0.8"/>')
+    c += scallions([(56, 36), (66, 34), (48, 42), (82, 43), (60, 40)], r=1.9)
+    c += glints_at([(30, 36, 5, 1.2), (84, 36, 4, 1)])
+    defs = ('    <linearGradient id="lacq" x1="0" y1="0" x2="1" y2="0.4"><stop offset="0" stop-color="#3a3436"/><stop offset="1" stop-color="#141012"/></linearGradient>\n'
+            '    <radialGradient id="miso" cx="0.45" cy="0.4" r="0.65"><stop offset="0" stop-color="#d9a56a"/><stop offset="1" stop-color="#a96f3a"/></radialGradient>\n')
+    return bowl(defs, "url(#lacq)", "#8f2a1e", "url(#miso)", c)
+
+
+def udon(name, item):
+    rnd = random.Random("udon")
+    c = ""
+    for d in ("M24 40 C36 32 50 50 64 40 C76 32 86 46 98 40", "M28 46 C40 38 54 54 70 44 C80 38 88 48 94 45",
+              "M30 35 C42 30 54 42 66 35 C76 30 84 38 92 34", "M36 50 C48 44 60 54 74 49"):
+        c += f'<path d="{d}" fill="none" stroke="#d8c59a" stroke-width="5.4" stroke-linecap="round"/>'
+        c += f'<path d="{d}" fill="none" stroke="#fdf8ea" stroke-width="3.8" stroke-linecap="round"/>'
+    c += ('<g transform="translate(78 38) rotate(-10)"><path d="M-8 2 C-8 -5 8 -5 8 2 Z" fill="#fffaf2" stroke="#d9cfc0" stroke-width="0.5"/>'
+          '<path d="M-8 2 C-8 -5 8 -5 8 2" fill="none" stroke="#f07d9a" stroke-width="1.6"/>'
+          '<path d="M-4 1 C-4 -2 4 -2 4 1" fill="none" stroke="#f7b4c5" stroke-width="0.9"/></g>')
+    c += scallions([(46, 38), (54, 34), (60, 44), (40, 45), (68, 36)], r=1.9)
+    c += "".join(f'<circle cx="{f(rnd.uniform(40, 70))}" cy="{f(rnd.uniform(34, 46))}" r="{f(rnd.uniform(0.4, 0.7))}" fill="#c8402a"/>' for _ in range(8))
+    band = '<path d="M17 50 C26 62 44 70 60 70 C76 70 94 62 103 50" fill="none" stroke="#2e5f9e" stroke-width="3"/>'
+    defs = '    <linearGradient id="ub" x1="0" y1="0" x2="1" y2="0.3"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#dfe5ec"/></linearGradient>\n'
+    return bowl(defs, "url(#ub)", "#f4f6f8", "#e7c27c", c, band=band).replace('stroke="#1c1416"', 'stroke="#9aa8b6"')
+
+
+def chawanmushi(name, item):
+    body = """  <g transform="translate(0 4)">
+  <ellipse cx="60" cy="86" rx="42" ry="4" fill="#1c2b36" opacity="0.12"/>
+  <ellipse cx="60" cy="74" rx="44" ry="12" fill="#cfd6dc" stroke="#bcc5cd" stroke-width="0.6"/>
+  <ellipse cx="60" cy="72" rx="44" ry="12" fill="#f6f8fa" stroke="#c9d0d7" stroke-width="0.6"/>
+  <path d="M30 36 C31 60 44 74 60 74 C76 74 89 60 90 36 Z" fill="url(#cup)" stroke="#9aa8b6" stroke-width="0.7"/>
+  <path d="M33 50 C40 60 50 64 60 64 C70 64 80 60 87 50" fill="none" stroke="#b5303a" stroke-width="2"/>
+  <path d="M38 58 l4 -3 l4 3 l4 -3 l4 3 l4 -3 l4 3 l4 -3 l4 3 l4 -3 l4 3" fill="none" stroke="#b5303a" stroke-width="1"/>
+  <ellipse cx="60" cy="36" rx="30" ry="11" fill="#fbfcfd" stroke="#9aa8b6" stroke-width="0.7"/>
+  <ellipse cx="60" cy="37" rx="26.5" ry="9" fill="url(#custard)"/>
+  <path d="M42 34 C50 30 62 30 72 32" fill="none" stroke="#fff" stroke-width="2.4" opacity="0.6" stroke-linecap="round"/>
+  <g transform="translate(66 38)"><path d="M-6 1 C-6 -4 2 -6 6 -2 C3 -1 1 2 -2 3 C-4 3.5 -6 3 -6 1 Z" fill="#f58a6a" stroke="#c9563a" stroke-width="0.5"/>
+    <path d="M-4 0 C-2 -3 2 -3.5 4 -2" fill="none" stroke="#fff" stroke-width="1" opacity="0.8"/></g>
+  <g transform="translate(70 35)"><ellipse rx="3.4" ry="2" fill="#8a6a4a" stroke="#5e4428" stroke-width="0.5"/><ellipse cx="-0.6" cy="-0.6" rx="1.4" ry="0.6" fill="#b89a74"/></g>
+  <g transform="translate(51 36)"><ellipse cx="-3" cy="0" rx="3.2" ry="2" fill="#5ea34a" stroke="#3f7a2c" stroke-width="0.5"/><ellipse cx="3" cy="0" rx="3.2" ry="2" fill="#5ea34a" stroke="#3f7a2c" stroke-width="0.5"/>
+    <ellipse cx="0" cy="-2.6" rx="2" ry="3" fill="#6fb655" stroke="#3f7a2c" stroke-width="0.5"/><path d="M0 0 L0 4" stroke="#3f7a2c" stroke-width="0.9"/></g>
+  </g>
+"""
+    defs = ('    <linearGradient id="cup" x1="0" y1="0" x2="1" y2="0.3"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#dde4eb"/></linearGradient>\n'
+            '    <linearGradient id="custard" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fdf0c2"/><stop offset="1" stop-color="#f0d27c"/></linearGradient>\n')
+    return svg(body, defs, plate=False)
+
+
+def wasabi(name, item):
+    rnd = random.Random("wasabi")
+    c = ('  <g transform="translate(60 60) scale(1.5) translate(-60 -56)">\n'
+         '  <ellipse cx="60" cy="62" rx="16" ry="4" fill="#1c2b36" opacity="0.12"/>\n'
+         '  <path d="M44 60 C42 52 50 46 56 44 C60 40 62 34 66 33 C66 38 64 42 68 45 C76 48 78 56 74 60 C68 65 50 65 44 60 Z" fill="url(#w)" stroke="#3f7a22" stroke-width="0.5"/>\n'
+         '  <path d="M50 52 C54 48 60 47 64 48 M48 58 C56 56 66 57 72 55" fill="none" stroke="#b9dc84" stroke-width="1.4" opacity="0.8" stroke-linecap="round"/>\n'
+         + "".join(f'  <circle cx="{f(rnd.uniform(46, 74))}" cy="{f(rnd.uniform(46, 62))}" r="{f(rnd.uniform(0.4, 0.8))}" fill="#4f8a2a" opacity="0.6"/>\n' for _ in range(26))
+         + glints_at([(52, 49, 4, 1.1), (62, 38, 2.5, 1)]) + "\n  </g>\n")
+    return svg(c, '    <linearGradient id="w" x1="0" y1="0" x2="0.3" y2="1"><stop offset="0" stop-color="#a8d266"/><stop offset="1" stop-color="#5f9a35"/></linearGradient>\n')
+
+
+def gari(name, item):
+    rnd = random.Random(name)
+    c = '  <g transform="translate(60 61) scale(1.4) translate(-60 -56)">\n  <ellipse cx="60" cy="64" rx="20" ry="5" fill="#1c2b36" opacity="0.10"/>\n'
+    for _ in range(9):
+        x, y = 60 + rnd.uniform(-12, 12), 55 + rnd.uniform(-5, 5)
+        rot, rx = rnd.randint(-40, 40), rnd.uniform(8, 11)
+        c += (f'  <g transform="translate({f(x)} {f(y)}) rotate({rot})">'
+              f'<ellipse rx="{f(rx)}" ry="{f(rx * 0.55)}" fill="#f9d8d2" opacity="0.92" stroke="#e8a8a0" stroke-width="0.7"/>'
+              f'<path d="M{f(-rx * 0.6)} 0 C0 -1.5 {f(rx * 0.3)} 1 {f(rx * 0.6)} 0" fill="none" stroke="#f3c2bb" stroke-width="0.6"/></g>\n')
+    c += f'  {glints_at([(54, 49, 4, 1.1), (66, 53, 3, 1)])}\n  </g>\n'
+    return svg(c)
+
+
+# ---------- 各种寿司 ----------
+
+def nig(light, base, shadow, side, line, **kw):
+    return dict(kind=nigiri, light=light, base=base, shadow=shadow, side=side, line=line, **kw)
+
+
+ITEMS = {
+    # 赤身：厚实饱满的叶片
+    "maguro": nig("#e54a5c", "#c9243a", "#8c1325", "#9b1a2d", "#6e0d1c", sheen=0.35, shape=dict(W=26, T=3),
+                  pattern=combine(lambda s: f'<path d="{s.line(-0.15, 0.25, 0.75)}" fill="none" stroke="#f06a78" stroke-width="3" opacity="0.5" filter="url(#soft)"/>',
+                                  gl((0.3, -0.55, 0.12, 1.8), (0.47, -0.65, 0.08, 1.5), (0.6, -0.5, 0.1, 1.6)))),
+    "chutoro": nig("#f3909c", "#e0596c", "#b03548", "#c0485a", "#8a2234", sheen=0.4, shape=dict(W=26, T=3),
+                   pattern=combine(lines_across([0.2 + 0.075 * k for k in range(9)], "#ffe2e6", 1.1, 0.7, slant=0.04), STD_GL)),
+    "otoro": nig("#ffe0df", "#f3a9b1", "#d4808b", "#e39aa3", "#b06470", sheen=0.5, shape=dict(W=26, T=3),
+                 pattern=combine(marble("otoro", "#fff7f5", 55, 1.3), STD_GL)),
+    "katsuo": nig("#d24f60", "#b02a3d", "#761526", "#5f666e", "#5e0f1c", shape=dict(W=26, T=3.2),
+                  pattern=combine(hard_band(0.45, 1.05, "#7b838b"), soft_band(0.35, 0.55, "#3a3a3a", 0.5),
+                                  blotches("katsuo", "#2b2b2b", 12, (0.5, 1), (1.5, 3.2), 0.6), STD_GL),
+                  over=over_at(0.5, -0.4, ginger_scallion)),
+    "bincho": nig("#fde6e1", "#f1c6be", "#d29a90", "#dcaba2", "#a9766c", sheen=0.5, shape=dict(W=25, T=2.2, droop=0.28),
+                  pattern=combine(blotches("bincho", "#b9784a", 8, (-0.9, 0.2), (2, 4), 0.35), STD_GL),
+                  over=over_at(0.5, -0.35, onion_slivers)),
+    "salmon": nig("#ffaa70", "#f6823e", "#cf5d25", "#d96a2e", "#a84716", sheen=0.35, shape=dict(W=26, T=3),
+                  pattern=combine(lines_across([0.16 + 0.085 * k for k in range(9)], "#fff1e4", 1.6, 0.9, slant=0.05),
+                                  lines_across([0.2 + 0.085 * k for k in range(8)], "#ffcfae", 0.6, 0.7, slant=0.05), STD_GL)),
+    # 白身：薄而通透，靠皮边色带和配料区分
+    "tai": nig("#ffffff", "#f6ecea", "#dcc3c0", "#e9d2cf", "#b58e8a", sheen=0.45, shape=dict(T=2),
+               pattern=combine(soft_band(0.5, 1.05, "#ee8f98", 0.9), blotches("tai", "#d9505f", 12, (0.55, 1), (1, 2.6), 0.6),
+                               lines_along([0.42], "#ffffff", 1.2, 0.9), STD_GL)),
+    "hirame": nig("#ffffff", "#f1f1ee", "#cdd2d6", "#dde1e4", "#a9b0b7", sheen=0.5, shape=dict(W=24, T=1.8, taper=0.3, wp=0.5),
+                  pattern=combine(soft_band(-0.3, 0.6, "#dfe4ea", 0.6, 0.15, 0.85),
+                                  lines_across([0.3, 0.42, 0.54, 0.66], "#ffffff", 0.8, 0.8), gl((0.3, -0.6, 0.1, 1.2))),
+                  under=shiso, over=over_at(0.5, -0.3, momiji)),
+    "engawa": nig("#ffffff", "#f6f3ec", "#d1ccc0", "#e1dcd0", "#a39d8e", sheen=0.55, shape=dict(W=22, T=2.4),
+                  pattern=combine(lines_across([0.1 + 0.034 * k for k in range(24)], "#d4cbb8", 1.3, 0.9),
+                                  lines_across([0.115 + 0.034 * k for k in range(24)], "#ffffff", 0.8, 0.9), STD_GL)),
+    "hamachi": nig("#fff3ec", "#f4d5c6", "#d6a796", "#5c686e", "#a77f72", shape=dict(T=2.6),
+                   pattern=combine(soft_band(0.3, 0.72, "#c4505a"), hard_band(0.7, 1.05, "#6c7980"),
+                                   lines_along([0.76], "#c7d2d8", 0.9, 0.9), gl((0.3, -0.6, 0.1, 1.3), (0.5, -0.7, 0.08, 1.1)))),
+    "buri": nig("#fff6f0", "#f3d8cb", "#d4a594", "#505c63", "#a07868", shape=dict(T=2.8),
+                pattern=combine(soft_band(0.15, 0.7, "#a3323d", 0.9), hard_band(0.68, 1.05, "#5d6870"),
+                                lines_across([0.18 + 0.1 * k for k in range(7)], "#ffffff", 0.9, 0.6, -1, 0.1), STD_GL)),
+    "kanpachi": nig("#ffffff", "#f8e6df", "#dab7aa", "#e4c7bc", "#b08a7e", sheen=0.45, shape=dict(T=2.4),
+                    pattern=combine(lines_along([0.55], "#e3838c", 1.8, 0.85), STD_GL)),
+    # 光物：银色的皮
+    "aji": nig("#ffffff", "#dfe5e8", "#a9b8bf", "#e6b9b2", "#7d8e96", sheen=0.5, shape=dict(T=2.4),
+               pattern=combine(hard_band(-1.05, 0.3, "#7f9aa0"), blotches("aji", "#33454b", 22, (-0.6, 0.3), (1.4, 3.2), 0.7),
+                               lines_along([0.38], "#d8c56a", 1.1, 0.95), STD_GL),
+               over=over_at(0.5, -0.35, ginger_scallion)),
+    "saba": nig("#ffffff", "#e3ebf0", "#a9bac6", "#efd6cf", "#5e7686", sheen=0.5, shape=dict(T=3),
+                pattern=combine(hard_band(-1.05, 0.45, "#5d8797"), mackerel_stripes,
+                                lines_along([0.5], "#d8e4ea", 1.2, 0.9), STD_GL)),
+    "iwashi": nig("#ffffff", "#e6ecef", "#aab8c2", "#e4b0a6", "#6c7f8c", sheen=0.55, shape=dict(L=70, W=19, T=2.2),
+                  pattern=combine(hard_band(-1.05, 0.15, "#34587a"), dots_along(0.35, [0.18 + 0.08 * k for k in range(9)], "#16222c", 1.2),
+                                  gl((0.3, -0.5, 0.1, 1.2), (0.55, -0.6, 0.08, 1.1))),
+                  over=over_at(0.5, -0.3, ginger_dot)),
+    "kohada": nig("#ffffff", "#e6e9e2", "#aeb6ae", "#efd2c8", "#7c877f", sheen=0.5, shape=dict(L=62, W=24, T=2.2),
+                  pattern=combine(hard_band(-1.05, 0.15, "#8c9a92"),
+                                  *[dots_along(v, [0.1 + 0.035 * k for k in range(24)], "#2e3a38", 0.6) for v in (-0.15, 0.1, 0.35, 0.6)],
+                                  lines_across([0.42, 0.56], "#ffffff", 0.9, 0.9, -0.9, 0.6), STD_GL)),
+    "sanma": nig("#ffffff", "#dfe5ea", "#a6b3bd", "#e3b1a8", "#56657a", sheen=0.5, shape=dict(L=80, W=17, T=2.2, endh=0.4),
+                 pattern=combine(hard_band(-1.05, 0.35, "#2f3d5a"), lines_along([0.45], "#ffffff", 1.4, 1),
+                                 gl((0.3, -0.4, 0.1, 1.2), (0.55, -0.5, 0.08, 1.1))),
+                 over=lambda s: scallions([s.P(u, -0.3) for u in (0.42, 0.5, 0.58)], r=1.8)),
+    # 贝类
+    "hotate": nig("#fff7ef", "#f6e3d0", "#d6b597", "#e3c6aa", "#b08e70", sheen=0.6,
+                  shape=dict(L=46, W=27, T=3.5, taper=0, wp=0.22, droop=0.35, crown=3, endh=7),
+                  pattern=combine(lines_across([0.2 + 0.075 * k for k in range(9)], "#ead6bd", 0.7, 0.4),
+                                  gl((0.3, -0.5, 0.12, 1.6), (0.5, -0.65, 0.1, 1.4)))),
+    "akagai": nig("#ff9a6e", "#ef653d", "#c03a22", "#b2341f", "#8f2614", sheen=0.4,
+                  shape=dict(L=58, W=27, T=2.6, ripple=0.14, rf=15, wp=0.5),
+                  pattern=combine(inner_rim("#ffc3a3", 2.4, 0.9), slit(0.25, 0.75), STD_GL)),
+    "tsubugai": nig("#fffdf8", "#f4ecdd", "#cfc0a6", "#d9c9ae", "#9a8a72", sheen=0.5,
+                    shape=dict(L=58, T=3, ripple=0.07, rf=9),
+                    pattern=combine(inner_rim("#8d7b66", 4, 0.4), STD_GL)),
+    "hokkigai": nig("#ffffff", "#f6f0f2", "#d6c6ca", "#e3d3d7", "#a48f95", sheen=0.5, shape=dict(L=60, taper=0.6, wp=0.5),
+                    pattern=combine(soft_band(-1, 1, "#e86a7c", 0.75, 0.6, 1), soft_band(-1, 1, "#d8394f", 0.6, 0.8, 1),
+                                    slit(0.5, 0.95), STD_GL)),
+    "awabi": nig("#ece2bb", "#cfc398", "#9a8d5e", "#8f8456", "#5f5a34", sheen=0.4, shape=dict(L=54, W=26, T=3.6, wp=0.3),
+                 pattern=combine(lines_across([0.08 + 0.06 * k for k in range(15)], "#a99c6a", 0.7, 0.8, slant=0.08),
+                                 lines_across([0.08 + 0.06 * k for k in range(15)], "#a99c6a", 0.7, 0.8, slant=-0.08),
+                                 inner_rim("#5e5a30", 4, 0.55), STD_GL)),
+    # 虾蟹乌贼章鱼
+    "ebi": nig("#ffffff", "#fbeee8", "#e8c2b3", "#efc5b7", "#c96a52", shape=dict(L=58, taper=0.45, wp=0.4),
+               pattern=combine(*[hard_band(-1.05, 1.05, "#f2683f", 0.95, 0.1 + 0.13 * k, 0.17 + 0.13 * k) for k in range(6)],
+                               *[lines_across([0.17 + 0.13 * k], "#ffffff", 0.9, 0.7) for k in range(6)], STD_GL),
+               under=lambda s: tail(s)),
+    "amaebi": nig("#ffd5ca", "#ffae9b", "#e5806d", "#f0947f", "#c85c48", sheen=0.55,
+                  strips=[-6, 6], shape=dict(L=56, W=12, T=2, taper=0.5, wp=0.45, droop=0.3),
+                  pattern=combine(lines_across([0.2 + 0.1 * k for k in range(7)], "#ffcabd", 0.8, 0.8),
+                                  gl((0.3, -0.4, 0.12, 1.1), (0.55, -0.5, 0.08, 1))),
+                  under=lambda s: tail(s, "#ff6b4a", "#b23a24", 0.6)),
+    "botanebi": nig("#ffd0c4", "#f79080", "#d65a4e", "#e98374", "#a8443a", sheen=0.5, shape=dict(L=60, W=24, taper=0.45, T=2.6),
+                    pattern=combine(blotches("botan", "#c92f28", 40, (-0.95, 0.95), (0.4, 0.9), 0.75),
+                                    lines_across([0.2 + 0.11 * k for k in range(6)], "#ffbcae", 0.9, 0.8), STD_GL),
+                    under=lambda s: tail(s, "#e2452f", "#8f1f14", 1.25)),
+    "kani": nig("#ffffff", "#faf6f1", "#dccfc3", "#e9ded3", "#b0907e", sheen=0.5,
+                strips=[-6, 6], shape=dict(L=58, W=12, T=2.4, taper=0.05, wp=0.18, droop=0.18, crown=1.6),
+                pattern=combine(hard_band(-1.05, 0.55, "#e23b25"), soft_band(-0.4, 0.15, "#ff8a66", 0.7),
+                                lines_along([0.25, 0.5, 0.75], "#e6dbd0", 0.7, 0.9), gl((0.3, -0.5, 0.12, 1.2), (0.55, -0.6, 0.1, 1.1)))),
+    "ika": nig("#ffffff", "#fafbfc", "#cbd4de", "#e0e6ed", "#97a6b6", sheen=0.6, shape=dict(W=26, T=2.6, taper=0.1, wp=0.25),
+               pattern=combine(lines_across([0.12 + 0.045 * k for k in range(17)], "#d3dbe4", 0.6, 1),
+                               gl((0.25, -0.6, 0.14, 1.5), (0.55, -0.7, 0.1, 1.3))),
+               over=over_at(0.5, -0.25, ginger_dot)),
+    "tako": nig("#ffffff", "#f7f0f2", "#dcc6cc", "#7e2240", "#6e1f39", sheen=0.5, shape=dict(T=2.6, ripple=0.06, rf=18),
+                pattern=combine(hard_band(0.6, 1.05, "#8e2a4a"), soft_band(0.45, 0.65, "#c45a7a", 0.6), suckers, STD_GL)),
+    # 其他
+    "tamago": dict(kind=tamago),
+    "inari": dict(kind=inari),
+    "anago": nig("#f1cc93", "#d6a063", "#a26a35", "#94602e", "#7d4e22", sheen=0.4,
+                 shape=dict(L=68, W=26, T=1.8, taper=0.15, wp=0.3, endh=0.4, droop=0.2, ripple=0.06),
+                 pattern=combine(lines_along((-0.65, -0.35, -0.05, 0.25, 0.55), "#f5d6a8", 0.9, 0.75),
+                                 soft_band(-0.6, 0.3, "#8a4f20", 0.18, 0.2, 0.8), gl((0.3, -0.55, 0.1, 1.3), (0.55, -0.6, 0.08, 1.1)))),
+    "unagi": nig("#a86533", "#73401d", "#3d1d0b", "#211006", "#1e0d04", sheen=0.25,
+                 shape=dict(L=66, W=26, T=2.6, taper=0.15, wp=0.32, ripple=0.05), pattern=unagi_pattern, seeded=True),
+    # 军舰
+    "ikura": dict(kind=gunkan, base="#a52e10", filling=ikura_fill, behind=cucumbers),
+    "uni": dict(kind=gunkan, base="#c9781e", filling=uni_fill,
+                defs='    <radialGradient id="uni" cx="0.4" cy="0.35" r="0.7"><stop offset="0" stop-color="#ffd877"/><stop offset="0.6" stop-color="#f0a232"/><stop offset="1" stop-color="#c97418"/></radialGradient>\n'),
+    "tobikko": dict(kind=gunkan, base="#e0661a", filling=tobikko_fill),
+    "kanimiso": dict(kind=gunkan, base="#6e6a3c", filling=kanimiso_fill, behind=cucumbers),
+    "shirasu": dict(kind=gunkan, base="#ece8dc", filling=shirasu_fill),
+    "negitoro": dict(kind=gunkan, base="#e07a88", filling=negitoro_fill),
+    # 卷物
+    "kappamaki": dict(kind=maki, core=core_cucumber),
+    "tekkamaki": dict(kind=maki, core=core_rect(3.6, 3, "#c8323a", "#8c1325", "#e5606c")),
+    "kanpyomaki": dict(kind=maki, core=core_kanpyo),
+    "nattomaki": dict(kind=maki, core=core_natto),
+    "shinkomaki": dict(kind=maki, core=core_rect(3.6, 3, "#ecc832", "#b8941a", "#f8e47a")),
+    # 副菜
+    "misoshiru": dict(kind=misoshiru),
+    "chawanmushi": dict(kind=chawanmushi),
+    "wasabi": dict(kind=wasabi),
+    "gari": dict(kind=gari),
+    "udon": dict(kind=udon),
+}
 
 
 def main():
-    import json
     OUT.mkdir(parents=True, exist_ok=True)
     for name, item in ITEMS.items():
         (OUT / f"{name}.svg").write_text(item["kind"](name, item), encoding="utf-8")
-    words = json.loads((OUT.parent.parent / "data" / "words.json").read_text(encoding="utf-8"))["words"]
+    words = json.loads((ROOT / "data" / "words.json").read_text(encoding="utf-8"))["words"]
     ids = {w["id"] for w in words}
     print(f"wrote {len(ITEMS)} svg")
     missing, extra = ids - ITEMS.keys(), ITEMS.keys() - ids

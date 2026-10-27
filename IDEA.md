@@ -47,7 +47,8 @@
 - **界面语言**：中英双语
 - **玩法**：基础连线 + 叠盘子计分 + 店里黑话关 + 汉字陷阱关 + 传送带模式（全都要）
 
-- **图片**：由 Claude 用 `tools/draw_sushi.py` 生成 SVG。斜俯视的白盘上斜摆两贯，不描边，用亮面、固有色、暗面三档颜色画出形体；鱼片画成拱起来的月牙形。画法依据见 [docs/illustration-research.md](docs/illustration-research.md)。样稿在 `samples.html`。
+- **图片**：由 Claude 用 `tools/draw_sushi.py` 生成 SVG。约 30° 的侧前方视角，白盘上左右并排两贯；鱼片「趴」在饭团上、两头垂到盘子；细的同色系描边；每种只放大 1～2 个辨认线索（皮边色带、花纹、配料）。依据见 [docs/illustration-plan.md](docs/illustration-plan.md)，全部插图在 `samples.html`。
+- **相似组**：实物也很难分的几种（油甘鱼 / 鰤鱼 / 红甘等）同一轮不同时出现。
 - **盘子颜色 = 价格**：和店里一样，白盘免费、蓝 ¥120、红 ¥180、紫 ¥260、金 ¥360（价格是大概的）。
 
 ## 分阶段计划
