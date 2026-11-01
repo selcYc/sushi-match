@@ -106,7 +106,10 @@ function t(key, vars = {}) {
 const word = (id) => state.words.find((w) => w.id === id);
 // 插图更新时改这个版本号，让手机重新下载，不用缓存里的旧图（和 index.html 里 css/js 的版本号一起改）
 const ASSET_VERSION = "0.8";
-const picture = (id) => `img/sushi/${id}.svg?v=${ASSET_VERSION}`;
+// data/images.json 里列出的词已经有 Gemini 生成的 WebP 插图（tools/gen_images.py process 会更新它），
+// 其余的继续用代码画的 SVG
+let webpIds = new Set();
+const picture = (id) => `img/sushi/${id}.${webpIds.has(id) ? "webp" : "svg"}?v=${ASSET_VERSION}`;
 
 // 右边小票的内容：图片模式放插图（alt 用当前界面语言的意思），否则放文字
 function fillTag(tag, w) {
@@ -569,6 +572,8 @@ async function init() {
     const data = await res.json();
     state.categories = data.categories;
     state.words = data.words;
+    // 清单读不到也没关系，全部用 SVG
+    webpIds = new Set(await fetch(`data/images.json?v=${ASSET_VERSION}`).then((r) => (r.ok ? r.json() : [])).catch(() => []));
   } catch {
     renderStatic();
     $("#fact").textContent = t("loadError");

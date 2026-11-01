@@ -27,7 +27,10 @@ python -m http.server 8790
 | `app.js` | 出题、连线、判定、设置 |
 | `data/words.json` | 题库：分类 + 词条 |
 | `img/sushi/<id>.svg` | 每个词的插图（「图」模式和本轮总结里用），由脚本生成，不要手改 |
-| `tools/draw_sushi.py` | 生成插图的脚本 |
+| `tools/draw_sushi.py` | 用代码画 SVG 插图的脚本 |
+| `tools/gen_images.py` | 用 Gemini 批量生成插图、处理成 WebP 的脚本（用法见 `docs/gemini-prompts.md`） |
+| `docs/gemini-prompts.md` | Gemini 生成插图的提示词（脚本也从这里读） |
+| `data/images.json` | 已经换成 Gemini 插图（WebP）的词，其余用 SVG |
 | `samples.html` | 插图一览，按分类列出全部插图 |
 | `docs/illustration-research.md` | 第一轮插图调研（扁平插画） |
 | `docs/illustration-plan.md` | 第二轮调研（回转寿司店实物照片）和现在的画法依据 |

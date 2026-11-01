@@ -27,7 +27,10 @@
     <div id="list"></div>
   </main>
   <script>
-    fetch("data/words.json").then((r) => r.json()).then(({ categories, words }) => {
+    Promise.all([
+      fetch("data/words.json").then((r) => r.json()),
+      fetch("data/images.json").then((r) => (r.ok ? r.json() : [])).catch(() => []),
+    ]).then(([{ categories, words }, webp]) => {
       const list = document.getElementById("list");
       for (const c of categories) {
         const h = document.createElement("h2");
@@ -38,7 +41,7 @@
           const card = document.createElement("div");
           card.className = "card";
           card.innerHTML = `<img alt=""><b lang="ja"></b><small></small>`;
-          card.querySelector("img").src = `img/sushi/${w.id}.svg?v=${Date.now()}`;
+          card.querySelector("img").src = `img/sushi/${w.id}.${webp.includes(w.id) ? "webp" : "svg"}?v=${Date.now()}`;
           card.querySelector("b").textContent = w.kana;
           card.querySelector("small").textContent = w.zh;
           grid.append(card);

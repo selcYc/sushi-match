@@ -3,3 +3,8 @@ __pycache__/
 .DS_Store
 Thumbs.db
 .claude/settings.local.json
+
+# Gemini 生成的候选图很大，只保留参考图和挑选结果
+img/raw/*
+!img/raw/_reference.png
+!img/raw/picks.json
