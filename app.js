@@ -105,7 +105,7 @@ function t(key, vars = {}) {
 
 const word = (id) => state.words.find((w) => w.id === id);
 // 插图更新时改这个版本号，让手机重新下载，不用缓存里的旧图（和 index.html 里 css/js 的版本号一起改）
-const ASSET_VERSION = "0.8";
+const ASSET_VERSION = "0.9";
 // data/images.json 里列出的词已经有 Gemini 生成的 WebP 插图（tools/gen_images.py process 会更新它），
 // 其余的继续用代码画的 SVG
 let webpIds = new Set();

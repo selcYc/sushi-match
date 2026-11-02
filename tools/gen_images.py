@@ -42,6 +42,7 @@ DEFAULT_MODEL = "gemini-nano-banana-2.1"
 PRICE = {"gemini-nano-banana-2.1": 0.034, "gemini-3.1-flash-lite-image": 0.034, "gemini-3.1-flash-image": 0.067,
          "gemini-3-pro-image": 0.134, "gemini-2.5-flash-image": 0.039}
 OUT_WIDTH = 480
+TIMEOUT = 150  # 单张图最多等多少秒；正常 15 秒左右
 
 
 # ---------- 提示词 ----------
@@ -49,10 +50,12 @@ OUT_WIDTH = 480
 def load_prompts():
     """从 docs/gemini-prompts.md 读出风格、模板和每个词的描述（按文件里的顺序）。"""
     text = PROMPTS.read_text(encoding="utf-8")
-    blocks = re.findall(r"```\n(.*?)\n```", text, re.S)
-    if len(blocks) < 2:
-        sys.exit(f"{PROMPTS} 里应该有两个代码块（第一张的提示词、带参考图的模板）")
-    first, template = blocks[0], blocks[1]
+    # 按内容认代码块：带 "Sushi:" 的是第一张的完整提示词，带 {寿司描述} 的是模板（文件里还有用法说明的代码块）
+    blocks = re.findall(r"^```[a-z]*\n(.*?)\n```$", text, re.S | re.M)
+    first = next((b for b in blocks if "\nSushi:" in b), None)
+    template = next((b for b in blocks if "{寿司描述}" in b), None)
+    if not first or not template:
+        sys.exit(f"{PROMPTS} 里没找到提示词代码块（第一张的完整提示词、带 {{寿司描述}} 的模板）")
     style = "\n".join(line for line in first.splitlines() if not line.startswith("Sushi:"))
     ids = {w["id"] for w in json.loads((ROOT / "data" / "words.json").read_text(encoding="utf-8"))["words"]}
     items = {}
@@ -73,6 +76,15 @@ def build_prompt(style, template, desc, with_reference):
 
 # ---------- 调用 Gemini ----------
 
+def to_png(data):
+    """Gemini 返回的其实常是 JPEG，统一转成 PNG 存。"""
+    import io
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.open(io.BytesIO(data)).save(buf, "PNG")
+    return buf.getvalue()
+
+
 def generate_one(client, model, prompt, ref_bytes, size):
     """生成一张图，返回 PNG 字节。优先用新的 Interactions 接口，SDK 太旧时退回 generate_content。"""
     if hasattr(client, "interactions"):
@@ -82,8 +94,12 @@ def generate_one(client, model, prompt, ref_bytes, size):
         it = client.interactions.create(
             model=model, input=parts,
             response_format={"type": "image", "aspect_ratio": "16:9", "image_size": size},
+            timeout=TIMEOUT,
         )
-        return base64.b64decode(it.output_image.data)
+        img = getattr(it, "output_image", None)
+        if img is None or not img.data:
+            raise RuntimeError(f"返回里没有图片（status={getattr(it, 'status', '?')}）")
+        return to_png(base64.b64decode(img.data))
 
     from google.genai import types
     contents = [prompt]
@@ -92,12 +108,13 @@ def generate_one(client, model, prompt, ref_bytes, size):
     resp = client.models.generate_content(
         model=model, contents=contents,
         config=types.GenerateContentConfig(response_modalities=["IMAGE"],
-                                           image_config=types.ImageConfig(aspect_ratio="16:9")),
+                                           image_config=types.ImageConfig(aspect_ratio="16:9"),
+                                           http_options=types.HttpOptions(timeout=TIMEOUT * 1000)),
     )
     for part in resp.candidates[0].content.parts:
         if getattr(part, "inline_data", None) and part.inline_data.data:
             data = part.inline_data.data
-            return data if isinstance(data, bytes) else base64.b64decode(data)
+            return to_png(data if isinstance(data, bytes) else base64.b64decode(data))
     raise RuntimeError("返回里没有图片")
 
 
@@ -147,15 +164,17 @@ def cmd_generate(args):
         for _ in range(k):
             n = len(candidates(wid)) + 1
             for attempt in range(3):
+                print(f"[{done + 1}/{calls}] {wid} #{n} 生成中……", end=" ", flush=True)
+                t = time.time()
                 try:
                     data = generate_one(client, args.model, prompt, ref_bytes, args.size)
                     (folder / f"{n}.png").write_bytes(data)
                     done += 1
-                    print(f"[{done}/{calls}] {wid} #{n}")
+                    print(f"好了（{time.time() - t:.0f} 秒）")
                     break
-                except Exception as e:  # 网络错误、限流等：等一会儿再试
+                except Exception as e:  # 网络错误、限流、超时等：等一会儿再试
                     wait = 5 * (attempt + 1)
-                    print(f"  {wid} #{n} 失败（{e}），{wait} 秒后重试")
+                    print(f"失败（{type(e).__name__}: {e}），{wait} 秒后重试")
                     time.sleep(wait)
             else:
                 print(f"  {wid} #{n} 跳过")
@@ -272,7 +291,8 @@ def cmd_process(args):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sys.stdout.reconfigure(line_buffering=True)  # 进度马上显示，不攒到最后
+    ap =argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     g = sub.add_parser("generate", help="调用 Gemini 生成候选图")
     g.add_argument("ids", nargs="*", help="只生成这些词（默认全部）")

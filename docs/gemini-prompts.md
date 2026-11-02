@@ -116,7 +116,7 @@ Plain solid pure white background, no text. Wide 16:9.
 |---|---|---|
 | hotate | Hotate (scallop) nigiri — on each piece one thick, round, plump scallop, cream-peach colored, glossy and slightly translucent. | 圆鼓鼓 |
 | akagai | Akagai (ark clam) nigiri — bright orange-red butterflied shellfish with frilly, curled edges, very glossy. | 橙红褶边 |
-| tsubugai | Tsubugai (whelk) nigiri — thick, glossy ivory-white slices with a slight greyish-brown tint at the edges. | 奶白厚片 |
+| tsubugai | Tsubugai (white whelk) nigiri — on each piece, a thin, glossy, slightly translucent cream-white slice of whelk, butterflied: one straight slit runs down the middle so the slice opens into two smooth lobes draped over the rice. The outer edges and the tip have a soft pale apricot-yellow tint, with a few faint curved lines on the surface. Not grey, not puffy, no knife scoring. | 奶白厚片 |
 | hokkigai | Hokkigai (surf clam) nigiri — white shellfish with a pointed, beak-like tip that turns pinkish-red, with a slit down the middle. | 红尖鸟嘴 |
 | awabi | Awabi (abalone) nigiri — a thick oval olive-beige slice with criss-cross knife scoring and a darker rim. | 橄榄色厚片 |
 
@@ -125,7 +125,7 @@ Plain solid pure white background, no text. Wide 16:9.
 | id | 寿司描述 | 要点 |
 |---|---|---|
 | ebi | Ebi (boiled shrimp) nigiri — a butterflied shrimp with orange-red and white stripes and a red fan-shaped tail sticking out at one end. | 红白条 + 虾尾 |
-| amaebi | Amaebi (sweet shrimp) nigiri — on each piece, two or three small raw translucent pink shrimp laid side by side, each with a small red tail. | 两三只小虾 |
+| amaebi | Amaebi (sweet shrimp) nigiri — on each piece, exactly three small, thin, raw translucent pink shrimp lying side by side across the rice (clearly three separate shrimp, much thinner than one big shrimp), so three small red tails stick out together at one end. | 两三只小虾 |
 | botanebi | Botan-ebi nigiri — on each piece, one large raw translucent pink shrimp with red speckles and a big red tail. | 一只大虾带红点 |
 | kani | Kani (crab) nigiri — two sticks of crab leg meat lying side by side on the rice, red on top and white underneath, with fibrous texture. | 两根蟹腿 |
 | ika | Ika (squid) nigiri — an opaque, pure white, glossy slice with very fine parallel knife cuts, a tiny yellow dab of grated ginger on top. | 纯白 + 姜泥 |
